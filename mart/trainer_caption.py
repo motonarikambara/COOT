@@ -11,6 +11,7 @@ from glob import glob
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Dict, List, Optional, Tuple, Union
+import sys
 
 import numpy as np
 import torch as th
@@ -34,6 +35,7 @@ from nntrainer.metric import TRANSLATION_METRICS, TextMetricsConst, TextMetricsC
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
+import wandb
 
 
 def cal_performance(pred, gold):
@@ -234,6 +236,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
+        wandb.init(name="tmp", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -272,6 +275,10 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list = [e["input_mask"] for e in batched_data]
                         token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                         input_labels_list = [e["input_labels"] for e in batched_data]
+                        clips_feature = [e["clips_feature"] for e in batched_data]
+
+
+
 
                         if self.cfg.debug:
                             cur_data = batched_data[step]
@@ -279,10 +286,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                             self.logger.info("input_mask \n{}".format(cur_data["input_mask"][step]))
                             self.logger.info("input_labels \n{}".format(cur_data["input_labels"][step]))
                             self.logger.info("token_type_ids \n{}".format(cur_data["token_type_ids"][step]))
-
                         loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                            token_type_ids_list, input_labels_list)
+                                                            token_type_ids_list, input_labels_list, clips_feature)
+                        wandb.log({"train_loss":loss})
                     elif self.cfg.untied or self.cfg.mtrans:
+                        sys.exit()
                         # ---------- training step for untied models / vanilla transformer ----------
                         batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
                                                             non_blocking=self.cfg.cuda_non_blocking)
@@ -301,6 +309,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         pred_scores_list = [pred_scores]
                         input_labels_list = [text_labels]
                     else:
+                        sys.exit()
                         # ---------- non-recurrent MART and maybe others ----------
                         batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
                                                             non_blocking=self.cfg.cuda_non_blocking)
@@ -458,8 +467,9 @@ class MartTrainer(trainer_base.BaseTrainer):
                     token_type_ids_list = [e["token_type_ids"] for e in
                                            batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
+                    clips_feature = [e["clips_feature"] for e in batched_data]
                     loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                        token_type_ids_list, input_labels_list)
+                                                        token_type_ids_list, input_labels_list, clips_feature)
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
