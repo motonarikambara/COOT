@@ -1,0 +1,27 @@
+{
+    "os": "Linux-5.4.0-80-generic-x86_64-with-glibc2.2.5",
+    "python": "3.8.5",
+    "heartbeatAt": "2021-08-01T02:22:41.883183",
+    "startedAt": "2021-08-01T02:22:41.081249",
+    "docker": null,
+    "gpu": "GeForce RTX 2080",
+    "gpu_count": 1,
+    "cpu_count": 16,
+    "cuda": "10.0.130",
+    "args": [
+        "-c",
+        "config/caption/paper2020/yc2_100m_coot_vidclip_mart.yaml"
+    ],
+    "state": "running",
+    "program": "train_caption.py",
+    "codePath": "train_caption.py",
+    "git": {
+        "remote": "https://github.com/motonarikambara/COOT.git",
+        "commit": "4b06ac5b299c096b1c707b6e15ca61d94218cd23"
+    },
+    "email": "motonari.k714@gmail.com",
+    "root": "/home/motonari/lab/COOT",
+    "host": "n03",
+    "username": "motonari",
+    "executable": "/home/motonari/.pyenv/versions/coot/bin/python"
+}

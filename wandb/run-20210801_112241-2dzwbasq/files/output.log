@@ -1,0 +1,43 @@
+ INFO Training from 0 to 50
+ INFO Training Models on devices model: cuda:0
+ INFO Experiment ---------- default/yc2_100m_coot_vidclip_mart/run2021-08-01 11:22:38.869853 ---------- epoch current/best/bad: -1/-1/0
+ INFO 2021-08-01 11:22:41 ---------- Training epoch: 0
+  0%|                                                    | 0/84 [00:00<?, ?it/s]
+  0%|                                                    | 0/50 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "train_caption.py", line 103, in <module>
+    main()
+  File "train_caption.py", line 94, in main
+    trainer.train_model(train_loader, val_loader)
+  File "/home/motonari/lab/COOT/mart/trainer_caption.py", line 261, in train_model
+    for step, batch in enumerate(tqdm(train_loader)):
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/tqdm/std.py", line 1185, in __iter__
+    for obj in iterable:
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 435, in __next__
+    data = self._next_data()
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1085, in _next_data
+    return self._process_data(data)
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1111, in _process_data
+    data.reraise()
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/_utils.py", line 428, in reraise
+    raise self.exc_type(msg)
+KeyError: Caught KeyError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/motonari/lab/COOT/mart/recursive_caption_dataset.py", line 318, in _load_coot_video_feature
+    vid_num = self.coot_vid_id_to_vid_number[raw_name]
+KeyError: 'Dp_khENsaUQ'
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 198, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/motonari/.pyenv/versions/coot/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/motonari/lab/COOT/mart/recursive_caption_dataset.py", line 280, in __getitem__
+    items, meta = self.convert_example_to_features(self.data[index])
+  File "/home/motonari/lab/COOT/mart/recursive_caption_dataset.py", line 377, in convert_example_to_features
+    vid_feat, vidctx_feat, clip_feats, clip_vid = self._load_coot_video_feature(raw_name)
+  File "/home/motonari/lab/COOT/mart/recursive_caption_dataset.py", line 324, in _load_coot_video_feature
+    vid_num = self.coot_vid_id_to_vid_number[fixed_name]
+KeyError: '_khENsaUQ_train'
