@@ -1453,8 +1453,7 @@ class RecursiveTransformer(nn.Module):
 
             clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
             clip_feature = clips[: , -1, :].view(-1, 1, 384)
-            print(clip_feature)
-            sys.exit()
+            # sys.exit()
             video_features_list[idx][:, :, 768:1152] = clip_feature
             prev_ms, encoded_layer_outputs, prediction_scores =\
                 self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],

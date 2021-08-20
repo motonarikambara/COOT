@@ -584,8 +584,9 @@ class RecursiveCaptionDataset(data.Dataset):
             mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
             # 上記のように特徴量を配置
             # feat∈25×1152
-            feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
-            feat[1:len(raw_feat) + 1] = raw_feat
+            # feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
+            # feat[1:len(raw_feat) + 1] = raw_feat
+            feat = raw_feat
             return feat, video_tokens, mask
         
     # Regular video features
