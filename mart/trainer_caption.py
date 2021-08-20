@@ -275,7 +275,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list = [e["input_mask"] for e in batched_data]
                         token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                         input_labels_list = [e["input_labels"] for e in batched_data]
-                        clips_feature = [e["clips_feature"] for e in batched_data]
+                        # clips_feature = [e["clips_feature"] for e in batched_data]
 
 
 
@@ -287,7 +287,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                             self.logger.info("input_labels \n{}".format(cur_data["input_labels"][step]))
                             self.logger.info("token_type_ids \n{}".format(cur_data["token_type_ids"][step]))
                         loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                            token_type_ids_list, input_labels_list, clips_feature)
+                                                            token_type_ids_list, input_labels_list)
                         wandb.log({"train_loss":loss})
                     elif self.cfg.untied or self.cfg.mtrans:
                         sys.exit()
@@ -467,9 +467,9 @@ class MartTrainer(trainer_base.BaseTrainer):
                     token_type_ids_list = [e["token_type_ids"] for e in
                                            batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-                    clips_feature = [e["clips_feature"] for e in batched_data]
+                    # clips_feature = [e["clips_feature"] for e in batched_data]
                     loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                        token_type_ids_list, input_labels_list, clips_feature)
+                                                        token_type_ids_list, input_labels_list)
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
