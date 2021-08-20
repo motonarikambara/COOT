@@ -1396,7 +1396,7 @@ class RecursiveTransformer(nn.Module):
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=3, batch_first=True)
+        self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
 
         self.apply(self.init_bert_weights)
 
