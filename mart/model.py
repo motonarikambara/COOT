@@ -1396,7 +1396,7 @@ class RecursiveTransformer(nn.Module):
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
+        # self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
 
         self.apply(self.init_bert_weights)
 
@@ -1426,8 +1426,10 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
+    # def forward(self, input_ids_list, video_features_list, input_masks_list,
+    #             token_type_ids_list, input_labels_list, clips_feature, return_memory=False):
     def forward(self, input_ids_list, video_features_list, input_masks_list,
-                token_type_ids_list, input_labels_list, clips_feature, return_memory=False):
+                token_type_ids_list, input_labels_list, return_memory=False):
         """
         Args:
             input_ids_list: [(N, L)] * step_size
@@ -1449,12 +1451,12 @@ class RecursiveTransformer(nn.Module):
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         for idx in range(step_size):
-            self.lstm.flatten_parameters()
+            # self.lstm.flatten_parameters()
 
-            clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
-            clip_feature = clips[: , -1, :].view(-1, 1, 384)
-            # sys.exit()
-            video_features_list[idx][:, :, 768:1152] = clip_feature
+            # clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
+            # clip_feature = clips[: , -1, :].view(-1, 1, 384)
+            # video_features_list[idx][:, :, 768:1152] = clip_feature
+
             prev_ms, encoded_layer_outputs, prediction_scores =\
                 self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
                                   input_masks_list[idx], token_type_ids_list[idx])

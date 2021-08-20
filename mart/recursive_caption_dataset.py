@@ -347,11 +347,13 @@ class RecursiveCaptionDataset(data.Dataset):
             clip_num = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{clip}"]
             clip_feat = np.array(h5[f_clip_emb][clip_num])
             clip_vid[clip, 0, :] = clip_feat
+            clip_feats.append(clip_feat)
         clip_feat = np.array(h5[f_clip_emb][0])
-        clip_feats.append(clip_feat)
+        # if 全てのクリップ
+        # clip_feats.append(clip_feat)
         clip_feats = np.stack(clip_feats, axis=0)
-        # return vid_feat, vidctx_feat, clip_feats
-        return vid_feat, vidctx_feat, clip_feats, clip_vid
+        return vid_feat, vidctx_feat, clip_feats
+        # return vid_feat, vidctx_feat, clip_feats, clip_vid
 
     def convert_example_to_features(self, example):
         """
@@ -373,9 +375,9 @@ class RecursiveCaptionDataset(data.Dataset):
             video_feature = self._load_mart_video_feature(raw_name)
         else:
             # load and concatenate coot features for this video
-            # video_feature = self._load_coot_video_feature(raw_name)
-            vid_feat, vidctx_feat, clip_feats, clip_vid = self._load_coot_video_feature(raw_name)
-            video_feature = vid_feat, vidctx_feat, clip_feats
+            video_feature = self._load_coot_video_feature(raw_name)
+            # vid_feat, vidctx_feat, clip_feats, clip_vid = self._load_coot_video_feature(raw_name)
+            # video_feature = vid_feat, vidctx_feat, clip_feats
 
         # print("loaded features", name, video_name, video_feature.shape)
         # print(video_feature)
@@ -386,15 +388,15 @@ class RecursiveCaptionDataset(data.Dataset):
             num_sen = len(example["sentences"])
             single_video_features = []
             single_video_meta = []
-            # for clip_idx in range(num_sen):
-            #     cur_data, cur_meta = self.clip_sentence_to_feature(
-            #         example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature,
-            #         clip_idx)
-            #     single_video_features.append(cur_data)
-            #     single_video_meta.append(cur_meta)
+            for clip_idx in range(num_sen):
+                cur_data, cur_meta = self.clip_sentence_to_feature(
+                    example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature,
+                    clip_idx)
+                single_video_features.append(cur_data)
+                single_video_meta.append(cur_meta)
             # cur_data:video特徴量を含むdict
-            cur_data, cur_meta = self.clip_sentence_to_feature(
-                example["name"], example["timestamps"], example["sentences"], video_feature, clip_vid)
+            # cur_data, cur_meta = self.clip_sentence_to_feature(
+            #     example["name"], example["timestamps"], example["sentences"], video_feature, clip_vid)
             single_video_features.append(cur_data)
             single_video_meta.append(cur_meta)
             # single_video_features: video特徴量を含むdict
@@ -413,8 +415,8 @@ class RecursiveCaptionDataset(data.Dataset):
         #     example["name"], example["timestamp"], example["sentence"], video_feature, example["idx"])
         # return cur_data, cur_meta
 
-    # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_idx: int):
-    def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_vid):
+    def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_idx: int):
+    # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_vid):
         """
         make features for a single clip-sentence pair.
         [CLS], [VID], ..., [VID], [SEP], [BOS], [WORD], ..., [WORD], [EOS]
@@ -430,8 +432,8 @@ class RecursiveCaptionDataset(data.Dataset):
             frm2sec = self.frame_to_second[name[2:]] if self.dset_name == "activitynet" else self.frame_to_second[name]
 
         # video + text tokens
-        # feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx)
-        feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec)
+        feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx)
+        # feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec)
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
 
         input_tokens = video_tokens + text_tokens
@@ -444,10 +446,14 @@ class RecursiveCaptionDataset(data.Dataset):
         token_type_ids = [0] * self.max_v_len + [1] * self.max_t_len
 
 
+        # coll_data = dict(
+        #     name=name, input_tokens=input_tokens, input_ids=np.array(input_ids).astype(np.int64),
+        #     input_labels=np.array(input_labels).astype(np.int64), input_mask=np.array(input_mask).astype(np.float32),
+        #     token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32), clips_feature=clip_vid.astype(np.float32))
         coll_data = dict(
             name=name, input_tokens=input_tokens, input_ids=np.array(input_ids).astype(np.int64),
             input_labels=np.array(input_labels).astype(np.int64), input_mask=np.array(input_mask).astype(np.float32),
-            token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32), clips_feature=clip_vid.astype(np.float32))
+            token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32))
         meta = dict(
             name=name, timestamp=timestamp, sentence=sentence, )
         return coll_data, meta
@@ -521,12 +527,12 @@ class RecursiveCaptionDataset(data.Dataset):
             st, ed, feat_len)
         return st, ed
 
-    # def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l):
+    def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l):
     # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
-    def _get_vt_features(self, video_feat_tuple, max_v_l):
+    # def _get_vt_features(self, video_feat_tuple, max_v_l):
         vid_feat, vid_ctx_feat, clip_feats = video_feat_tuple
-        # clip_feat = clip_feats[clip_idx]
-        clip_feat = clip_feats[0]
+        clip_feat = clip_feats[clip_idx]
+        # clip_feat = clip_feats[0]
         # 現在使っているのはvidclip
         if self.coot_mode == "clip":
             # only clip (1, 384)
@@ -564,8 +570,8 @@ class RecursiveCaptionDataset(data.Dataset):
         assert valid_l == max_v_l, f"valid {valid_l} max {max_v_l}"
         return feat, valid_l
 
-    # def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx):
-    def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec):
+    def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx):
+    # def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec):
         """
         [CLS], [VID], ..., [VID], [SEP], [PAD], ..., [PAD],
         All non-PAD tokens are valid, will have a mask value of 1.
@@ -577,16 +583,16 @@ class RecursiveCaptionDataset(data.Dataset):
         if  self.data_type == DataTypesConstCaption.COOT_EMB:
             # COOT video text data as input
             max_v_l = self.max_v_len - 2
-            # raw_feat, valid_l = self._get_vt_features(raw_feat, clip_idx, max_v_l)
-            raw_feat, valid_l = self._get_vt_features(raw_feat, max_v_l)
+            raw_feat, valid_l = self._get_vt_features(raw_feat, clip_idx, max_v_l)
+            # raw_feat, valid_l = self._get_vt_features(raw_feat, max_v_l)
             video_tokens = [self.CLS_TOKEN] + [self.VID_TOKEN] * valid_l +\
                            [self.SEP_TOKEN] + [self.PAD_TOKEN] * (max_v_l - valid_l)
             mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
             # 上記のように特徴量を配置
             # feat∈25×1152
-            # feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
-            # feat[1:len(raw_feat) + 1] = raw_feat
-            feat = raw_feat
+            feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
+            feat[1:len(raw_feat) + 1] = raw_feat
+            # feat = raw_feat
             return feat, video_tokens, mask
         
     # Regular video features
