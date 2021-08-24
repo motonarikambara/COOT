@@ -254,24 +254,6 @@ class RecursiveCaptionDataset(data.Dataset):
         print(f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}")
 
         self.preloading_done = False
-        # 以下は使用していない
-        # if self.preload:
-        #     # load video features to memory
-        #     self.preloaded_videos = {}
-        #     for meta in tqdm(self.data, desc=f"Preload {self.dset_name} {mode}"):
-        #         raw_name = meta["name"]
-        #         if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
-        #             # default video features from MART paper. returns np.array
-        #             video_feature = self._load_mart_video_feature(raw_name)
-        #             self.preloaded_videos[raw_name] = create_shared_array(video_feature)
-        #         else:
-        #             # load and concatenate coot features for this video. returns Tuple[np.array, np.array, np.array]
-        #             video_feature = self._load_coot_video_feature(raw_name)
-        #             stack = []
-        #             for array in video_feature:
-        #                 stack.append(create_shared_array(array))
-        #             self.preloaded_videos[raw_name] = stack
-        #     self.preloading_done = True
 
     def __len__(self):
         return len(self.data)
@@ -404,16 +386,6 @@ class RecursiveCaptionDataset(data.Dataset):
         else:
             print("recursive_caption_dataset.py")
             sys.exit()
-        # 以下は使用しない
-        # if self.untied:
-        #     # single sentence
-        #     cur_data, cur_meta = self.clip_sentence_to_feature_untied(
-        #         example["name"], example["timestamp"], example["sentence"], video_feature, example["idx"])
-        #     return cur_data, cur_meta
-        # # single sentence not untied
-        # cur_data, cur_meta = self.clip_sentence_to_feature(
-        #     example["name"], example["timestamp"], example["sentence"], video_feature, example["idx"])
-        # return cur_data, cur_meta
 
     def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_idx: int):
     # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_vid):
@@ -458,62 +430,6 @@ class RecursiveCaptionDataset(data.Dataset):
             name=name, timestamp=timestamp, sentence=sentence, )
         return coll_data, meta
 
-    # 多分使わない
-    # def clip_sentence_to_feature_untied(self, name, timestamp, sentence, raw_video_feature, clip_idx):
-    # def clip_sentence_to_feature_untied(self, name, timestamp, sentence, raw_video_feature):
-    #     """
-    #     make features for a single clip-sentence pair.
-    #     [CLS], [VID], ..., [VID], [SEP], [BOS], [WORD], ..., [WORD], [EOS]
-    #     Args:
-    #         name: str,
-    #         timestamp: [float, float]
-    #         sentence: str
-    #         raw_video_feature: np array, N x D, for the whole video
-    #         clip_idx:
-    #     """
-    #     # only need frames2seconds when using video features
-    #     frm2sec = None
-    #     if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
-    #         # for activitynet correct the video name
-    #         if self.dset_name == "activitynet":
-    #             correct_name = name[2:]
-    #         elif self.dset_name == "youcook2":
-    #             correct_name = name
-    #         else:
-    #             raise ValueError(f"Dataset unknown {self.dset_name}")
-    #         frm2sec = self.frame_to_second[correct_name]
-
-    #     # video + text tokens
-    #     # video_feature, video_mask = self._load_indexed_video_feature_untied(
-    #     #     raw_video_feature, timestamp, frm2sec, clip_idx)
-    #     video_feature, video_mask = self._load_indexed_video_feature_untied(
-    #         raw_video_feature, timestamp, frm2sec)
-    #     text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
-
-    #     text_ids = [self.word2idx.get(t, self.word2idx[self.UNK_TOKEN]) for t
-    #                 in text_tokens]
-    #     # shifted right, `-1` is ignored when calculating CrossEntropy Loss
-    #     text_labels = [self.IGNORE if m == 0 else tid for tid, m in
-    #                    zip(text_ids, text_mask)][1:] + [self.IGNORE]
-
-    #     item_data = dict(
-    #         name=name,
-    #         text_tokens=text_tokens,
-    #         # model inputs
-    #         text_ids=np.array(text_ids).astype(np.int64),
-    #         text_mask=np.array(text_mask).astype(np.float32),
-    #         text_labels=np.array(text_labels).astype(np.int64),
-    #         video_feature=video_feature.astype(np.float32),
-    #         video_mask=np.array(video_mask).astype(np.float32),
-    #     )
-    #     item_meta = dict(
-    #         # meta
-    #         name=name,
-    #         timestamp=timestamp,
-    #         sentence=sentence,
-    #     )
-    #     return item_data, item_meta
-
     @classmethod
     def _convert_to_feat_index_st_ed(cls, feat_len, timestamp, frm2sec):
         """
@@ -532,22 +448,22 @@ class RecursiveCaptionDataset(data.Dataset):
     # def _get_vt_features(self, video_feat_tuple, max_v_l):
         vid_feat, vid_ctx_feat, clip_feats = video_feat_tuple
         clip_feat = clip_feats[clip_idx]
-        # clip_feat = clip_feats[0]
         # 現在使っているのはvidclip
         if self.coot_mode == "clip":
             # only clip (1, 384)
-            # valid_l = 0
-            # feat = np.zeros((max_v_l, self.coot_dim_clip))
-            # feat[valid_l] = clip_feat
-            # valid_l += 1
-            print("CLIP")
+            valid_l = 0
+            feat = np.zeros((max_v_l, self.coot_dim_clip))
+            feat[valid_l] = clip_feat
+            valid_l += 1
+            # print("CLIP")
         elif self.coot_mode == "vidclip":
             # stack vid + clip vertically (1, 1152)
-            feat = np.zeros((max_v_l, self.coot_dim_vid + self.coot_dim_clip))
-            valid_l = 0
-            feat[valid_l, :self.coot_dim_vid] = vid_feat
-            feat[valid_l, self.coot_dim_vid:self.coot_dim_vid + self.coot_dim_clip] = clip_feat
-            valid_l += 1
+            # feat = np.zeros((max_v_l, self.coot_dim_vid + self.coot_dim_clip))
+            # valid_l = 0
+            # feat[valid_l, :self.coot_dim_vid] = vid_feat
+            # feat[valid_l, self.coot_dim_vid:self.coot_dim_vid + self.coot_dim_clip] = clip_feat
+            # valid_l += 1
+            print("VIDCLIP")
         elif self.coot_mode == "vidclipctx":
             # stack vid + ctx + clip vertically (1, 1536)
             # feat = np.zeros((max_v_l, self.coot_dim_vid + self.coot_dim_clip * 2))
@@ -599,68 +515,6 @@ class RecursiveCaptionDataset(data.Dataset):
     # 以下は使用しない
         print("_load_indexed_video_feature")
         sys.exit()
-        # max_v_l = self.max_v_len - 2
-        # feat_len = len(raw_feat)
-        # st, ed = self._convert_to_feat_index_st_ed(feat_len, timestamp,
-        #                                            frm2sec)
-        # indexed_feat_len = ed - st + 1
-
-        # feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
-        # if indexed_feat_len > max_v_l:
-        #     downsamlp_indices = np.linspace(st, ed, max_v_l, endpoint=True).astype(np.int).tolist()
-        #     assert max(downsamlp_indices) < feat_len
-        #     feat[1:max_v_l + 1] = raw_feat[downsamlp_indices]  # truncate, sample???
-
-        #     video_tokens = [self.CLS_TOKEN] + [self.VID_TOKEN] * max_v_l + [self.SEP_TOKEN]
-        #     mask = [1] * (max_v_l + 2)
-        # else:
-        #     valid_l = ed - st + 1
-        #     feat[1:valid_l + 1] = raw_feat[st:ed + 1]
-        #     video_tokens = [self.CLS_TOKEN] + [self.VID_TOKEN] * valid_l + [self.SEP_TOKEN] + [self.PAD_TOKEN] * (
-        #             max_v_l - valid_l)
-        #     mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
-        # return feat, video_tokens, mask
-
-    # 使ってなさそう
-    # def _load_indexed_video_feature_untied(self, raw_feat, timestamp, frm2sec, clip_idx):
-    # def _load_indexed_video_feature_untied(self, raw_feat, timestamp, frm2sec):
-    #     """
-    #     Untied version: [VID], ..., [VID], [PAD], ..., [PAD],
-    #     len == max_v_len
-
-    #     Returns:
-    #         feat is padded to length of (self.max_v_len,)
-    #         mask: self.max_v_len, with 1 indicates valid bits, 0 indicates
-    #             padding
-    #     """
-    #     if self.data_type == DataTypesConstCaption.COOT_EMB:
-    #         # COOT video text data as input
-    #         max_v_l = self.max_v_len
-    #         # feat, valid_l = self._get_vt_features(raw_feat, clip_idx, max_v_l)
-    #         feat, valid_l = self._get_vt_features(raw_feat, max_v_l)
-    #         mask = [1] * max_v_l
-    #         return feat, mask
-    #     else:
-    #         print("_load_indexed_video_feature_untied")
-
-        # 以下は使わない
-        # Regular video features
-        # max_v_l = self.max_v_len
-        # feat_len = len(raw_feat)
-        # st, ed = self._convert_to_feat_index_st_ed(feat_len, timestamp, frm2sec)
-        # indexed_feat_len = ed - st + 1
-
-        # if indexed_feat_len > max_v_l:
-        #     downsamlp_indices = np.linspace(st, ed, max_v_l, endpoint=True).astype(np.int).tolist()
-        #     assert max(downsamlp_indices) < feat_len
-        #     feat = raw_feat[downsamlp_indices]  # truncate, sample???
-        #     mask = [1] * max_v_l  # no padding
-        # else:
-        #     feat = np.zeros((max_v_l, raw_feat.shape[1]))  # only video features and padding
-        #     valid_l = ed - st + 1
-        #     feat[:valid_l] = raw_feat[st:ed + 1]
-        #     mask = [1] * valid_l + [0] * (max_v_l - valid_l)
-        # return feat, mask
 
     def _tokenize_pad_sentence(self, sentence):
         """
