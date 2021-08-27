@@ -257,7 +257,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             n_word_total = 0
             n_word_correct = 0
 
-            # ---------- Dataloader Iteration ----------
+            # ---------- Data　loader Iteration ----------
             for step, batch in enumerate(tqdm(train_loader)):
                 self.hook_pre_step_timer()  # hook for step timing
 

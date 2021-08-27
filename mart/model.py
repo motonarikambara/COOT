@@ -59,12 +59,16 @@ def create_mart_model(cfg: MartConfig, vocab_size: int, cache_dir: str = MartPat
     cfg.vocab_size = vocab_size
     if cfg.recurrent:
         if cfg.xl:
-            logger.info(f"Use recurrent model - TransformerXL with gradient {cfg.xl_grad}")
-            model = TransformerXL(cfg)
+            # logger.info(f"Use recurrent model - TransformerXL with gradient {cfg.xl_grad}")
+            # model = TransformerXL(cfg)
+            print("XL should be false")
+            sys.exit()
         else:
             logger.info("Use recurrent model - Mine")
             model = RecursiveTransformer(cfg)
     else:  # single sentence, including untied
+        print("recurrent should be True")
+        sys.exit()
         if cfg.untied:
             logger.info("Use untied non-recurrent single sentence model")
             model = NonRecurTransformerUntied(cfg)
@@ -1383,6 +1387,8 @@ class NonRecurTransformer(nn.Module):
         return caption_loss, prediction_scores
 
 
+
+# MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
