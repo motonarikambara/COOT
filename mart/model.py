@@ -1403,6 +1403,12 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         # self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
+        self.future_linear = nn.Sequential(nn.Linear(384, 786),
+                                            nn.ReLU(),
+                                            nn.Linear(786, 384),
+                                            nn.ReLU(),
+                                            nn.Dropout(0.2))
+        self.future_loss = nn.MSELoss()
 
         self.apply(self.init_bert_weights)
 
@@ -1432,10 +1438,17 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
+    # ver. LSTM
     # def forward(self, input_ids_list, video_features_list, input_masks_list,
     #             token_type_ids_list, input_labels_list, clips_feature, return_memory=False):
+
+    # ver. original
+    # def forward(self, input_ids_list, video_features_list, input_masks_list,
+    #             token_type_ids_list, input_labels_list, return_memory=False):
+
+    #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
-                token_type_ids_list, input_labels_list, return_memory=False):
+                token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
         """
         Args:
             input_ids_list: [(N, L)] * step_size
@@ -1449,23 +1462,28 @@ class RecursiveTransformer(nn.Module):
 
         Returns:
         """
-        # _, video_feature = self.lstm(video_features_list
+        # _, video_feature = self.lstm(video_features_list)
         # [(N, M, D)] * num_hidden_layers, initialized internally
         prev_ms = [None] * self.cfg.num_hidden_layers
         step_size = len(input_ids_list)
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
+        future_loss = 0
         for idx in range(step_size):
             # self.lstm.flatten_parameters()
 
             # clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
             # clip_feature = clips[: , -1, :].view(-1, 1, 384)
             # video_features_list[idx][:, :, 768:1152] = clip_feature
-
+            tmp_clip = self.future_linear(video_features_list[idx])
+            future_loss += self.future_loss(tmp_clip, gt_clip[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
-                self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
-                                  input_masks_list[idx], token_type_ids_list[idx])
+            self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
+                                input_masks_list[idx], token_type_ids_list[idx])           
+            # prev_ms, encoded_layer_outputs, prediction_scores =\
+            #     self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
+            #                       input_masks_list[idx], token_type_ids_list[idx])
 
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
@@ -1479,4 +1497,5 @@ class RecursiveTransformer(nn.Module):
             for idx in range(step_size):
                 caption_loss += self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
+                caption_loss += future_loss
             return caption_loss, prediction_scores_list

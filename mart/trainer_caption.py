@@ -276,6 +276,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                         input_labels_list = [e["input_labels"] for e in batched_data]
                         # clips_feature = [e["clips_feature"] for e in batched_data]
+                        future_clip = [e["future_clips"] for e in batched_data]
 
 
 
@@ -286,10 +287,15 @@ class MartTrainer(trainer_base.BaseTrainer):
                             self.logger.info("input_mask \n{}".format(cur_data["input_mask"][step]))
                             self.logger.info("input_labels \n{}".format(cur_data["input_labels"][step]))
                             self.logger.info("token_type_ids \n{}".format(cur_data["token_type_ids"][step]))
+                        # ver. lstm
                         # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
                         #                                     token_type_ids_list, input_labels_list, clips_feature)
+                        # ver. original
+                        # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
+                        #                                     token_type_ids_list, input_labels_list)
+                        # ver. future
                         loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                            token_type_ids_list, input_labels_list)
+                                                            token_type_ids_list, input_labels_list, future_clip)
                         wandb.log({"train_loss":loss})
                     elif self.cfg.untied or self.cfg.mtrans:
                         sys.exit()
@@ -469,19 +475,32 @@ class MartTrainer(trainer_base.BaseTrainer):
                     token_type_ids_list = [e["token_type_ids"] for e in
                                            batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
+                    future_clips = [e["future_clips"] for e in batched_data]
                     # clips_feature = [e["clips_feature"] for e in batched_data]
                     # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
                     #                                     token_type_ids_list, input_labels_list, clips_feature)
+                    # ver. original
+                    # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
+                    #                                     token_type_ids_list, input_labels_list)
+                    # ver. future
                     loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                                                        token_type_ids_list, input_labels_list)
+                                                        token_type_ids_list, input_labels_list, future_clips)
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
+                    # ver. origin
+                    # model_inputs = [
+                    #     [e["input_ids"] for e in batched_data],
+                    #     [e["video_feature"] for e in batched_data],
+                    #     [e["input_mask"] for e in batched_data],
+                    #     [e["token_type_ids"] for e in batched_data]]
+
                     model_inputs = [
                         [e["input_ids"] for e in batched_data],
                         [e["video_feature"] for e in batched_data],
                         [e["input_mask"] for e in batched_data],
-                        [e["token_type_ids"] for e in batched_data]]
+                        [e["token_type_ids"] for e in batched_data],
+                        [e["future_clips"] for e in batched_data]]
                     dec_seq_list = self.translator.translate_batch(
                         model_inputs, use_beam=self.cfg.use_beam, recurrent=True,
                         untied=False, xl=self.cfg.xl)
