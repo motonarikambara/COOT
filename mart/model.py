@@ -1493,9 +1493,10 @@ class RecursiveTransformer(nn.Module):
             return memory_list
         else:  # normal training/evaluation mode
             # compute loss, get predicted words
-            caption_loss = 0.
+            caption_loss = 0.0
             for idx in range(step_size):
-                caption_loss += self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+                tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
+                caption_loss += 0.1 * tmp_loss
                 caption_loss += future_loss
             return caption_loss, prediction_scores_list

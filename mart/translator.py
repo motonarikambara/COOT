@@ -199,7 +199,7 @@ class Translator(object):
             return dec_res_list
 
     def translate_batch_greedy(self, input_ids_list, video_features_list, input_masks_list, token_type_ids_list,
-                               rt_model):
+                               rt_model): 
         def greedy_decoding_step(prev_ms_, input_ids, video_features, input_masks, token_type_ids,
                                  model, max_v_len, max_t_len, start_idx=RCDataset.BOS, unk_idx=RCDataset.UNK):
             """
@@ -403,10 +403,15 @@ class Translator(object):
                 raise NotImplementedError
         else:
             if recurrent:
-                input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
+                # input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
+                # future
+                input_ids_list, video_features_list, input_masks_list, token_type_ids_list, future_feat_list = model_inputs
                 if xl:
-                    return self.translate_batch_greedy_xl(
-                        input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)
+                    # こちらは使っていない
+                    print("xl")
+                    # return self.translate_batch_greedy_xl(
+                    #     input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)
+                    
                 else:
                     return self.translate_batch_greedy(
                         input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)

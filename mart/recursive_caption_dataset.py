@@ -118,10 +118,13 @@ class RecursiveCaptionDataset(data.Dataset):
             else:
                 raise ValueError(f"Mode must be [train, val, test] for {self.dset_name}, got {mode}")
         elif self.dset_name == "youcook2":
+            tmp_path = "youcook2_next"
             if mode == "train":  # 1333 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_train.json"
+                # data_path = self.annotations_dir / self.dset_name / "captioning_train.json"
+                data_path = self.annotations_dir / tmp_path / "captioning_train.json"
             elif mode == "val":  # 457 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
+                # data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
+                data_path = self.annotations_dir / tmp_path / "captioning_val.json"
             else:
                 raise ValueError(f"Mode must be [train, val] for {self.dset_name}, got {mode}")
         else:
@@ -326,6 +329,7 @@ class RecursiveCaptionDataset(data.Dataset):
         clip_feats = []
         future_clip = []
         clip_vid = np.zeros((15, 1, 384))
+        future_vid = np.zeros((15, 1, 384))
         for clip in range(num_clips-1):
             future_num = clip + 1
             clip_num = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{clip}"]
@@ -333,6 +337,7 @@ class RecursiveCaptionDataset(data.Dataset):
             clip_feat = np.array(h5[f_clip_emb][clip_num])
             future_feat = np.array(h5[f_clip_emb][future])
             clip_vid[clip, 0, :] = clip_feat
+            # future_vid[clip, 0, :] = future_feat
             clip_feats.append(clip_feat)
             future_clip.append(future_feat)
         clip_feat = np.array(h5[f_clip_emb][0])
@@ -422,8 +427,9 @@ class RecursiveCaptionDataset(data.Dataset):
             frm2sec = self.frame_to_second[name[2:]] if self.dset_name == "activitynet" else self.frame_to_second[name]
 
         # video + text tokens
-        feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx)
-        # feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec)
+        # feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx)
+        # future
+        feat, video_tokens, video_mask, future_clip = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx, future_clip)
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
 
         input_tokens = video_tokens + text_tokens
@@ -467,20 +473,25 @@ class RecursiveCaptionDataset(data.Dataset):
             st, ed, feat_len)
         return st, ed
 
-    def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l):
+    # def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l):
+    # future
+    def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l, future_feats):
     # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
     # def _get_vt_features(self, video_feat_tuple, max_v_l):
         # vid_feat, vid_ctx_feat, clip_feats, future_clip = video_feat_tuple
         clip_feats = video_feat_tuple
         clip_feat = clip_feats[clip_idx]
-        # future_feat = future_clip[clip_idx]
+        future_feat = future_feats[clip_idx]
         # clip_feat = clip_feats[0]
         # 現在使っているのはvidclip
         if self.coot_mode == "clip":
             # only clip (1, 384)
             valid_l = 0
-            feat = np.zeros((max_v_l, self.coot_dim_clip * 2))
+            feat = np.zeros((max_v_l, self.coot_dim_clip))
             feat[valid_l] = clip_feat
+
+            future = np.zeros((max_v_l, self.coot_dim_clip))
+            future[valid_l] = future_feat            
             valid_l += 1
             # print("CLIP")
         elif self.coot_mode == "vidclip":
@@ -499,10 +510,13 @@ class RecursiveCaptionDataset(data.Dataset):
             raise NotImplementedError(f"Unknown: opt.vtmode = {self.coot_mode}")
 
         assert valid_l == max_v_l, f"valid {valid_l} max {max_v_l}"
-        return feat, valid_l
+        # return feat, valid_l
+        # future
+        return feat, valid_l, future
 
-    def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx):
-    # def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec):
+    # def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx):
+    # future
+    def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx, future_feats):
         """
         [CLS], [VID], ..., [VID], [SEP], [PAD], ..., [PAD],
         All non-PAD tokens are valid, will have a mask value of 1.
@@ -514,8 +528,9 @@ class RecursiveCaptionDataset(data.Dataset):
         if  self.data_type == DataTypesConstCaption.COOT_EMB:
             # COOT video text data as input
             max_v_l = self.max_v_len - 2
-            raw_feat, valid_l = self._get_vt_features(raw_feat, clip_idx, max_v_l)
-            # raw_feat, valid_l = self._get_vt_features(raw_feat, max_v_l)
+            # raw_feat, valid_l = self._get_vt_features(raw_feat, clip_idx, max_v_l)
+            # future
+            raw_feat, valid_l, future = self._get_vt_features(raw_feat, clip_idx, max_v_l, future_feats)
             video_tokens = [self.CLS_TOKEN] + [self.VID_TOKEN] * valid_l +\
                            [self.SEP_TOKEN] + [self.PAD_TOKEN] * (max_v_l - valid_l)
             mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
@@ -523,8 +538,13 @@ class RecursiveCaptionDataset(data.Dataset):
             # feat∈25×1152
             feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
             feat[1:len(raw_feat) + 1] = raw_feat
+            # future
+            future_feat = np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))  # includes [CLS], [SEP]
+            future_feat[1:len(future) + 1] = future            
             # feat = raw_feat
-            return feat, video_tokens, mask
+            # return feat, video_tokens, mask
+            # future
+            return feat, video_tokens, mask, future_feat
         
     # Regular video features
     # 以下は使用しない
