@@ -11,7 +11,6 @@ from glob import glob
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Dict, List, Optional, Tuple, Union
-import sys
 
 import numpy as np
 import torch as th
@@ -35,7 +34,6 @@ from nntrainer.metric import TRANSLATION_METRICS, TextMetricsConst, TextMetricsC
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
-import wandb
 
 
 def cal_performance(pred, gold):
@@ -236,12 +234,11 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="simple_transformer", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
         # ---------- Epoch Loop ----------
-        for _epoch in tqdm(range(self.state.current_epoch, self.cfg.train.num_epochs)):
+        for _epoch in range(self.state.current_epoch, self.cfg.train.num_epochs):
             if self.check_early_stop():
                 break
             self.hook_pre_train_epoch()  # pre-epoch hook: set models to train, time book-keeping
@@ -257,8 +254,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             n_word_total = 0
             n_word_correct = 0
 
-            # ---------- Data　loader Iteration ----------
-            for step, batch in enumerate(tqdm(train_loader)):
+            # ---------- Dataloader Iteration ----------
+            for step, batch in enumerate(train_loader):
                 self.hook_pre_step_timer()  # hook for step timing
 
                 # ---------- forward pass ----------
@@ -275,11 +272,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list = [e["input_mask"] for e in batched_data]
                         token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                         input_labels_list = [e["input_labels"] for e in batched_data]
-                        # clips_feature = [e["clips_feature"] for e in batched_data]
-                        future_clip = [e["future_clips"] for e in batched_data]
-
-
-
 
                         if self.cfg.debug:
                             cur_data = batched_data[step]
@@ -287,10 +279,50 @@ class MartTrainer(trainer_base.BaseTrainer):
                             self.logger.info("input_mask \n{}".format(cur_data["input_mask"][step]))
                             self.logger.info("input_labels \n{}".format(cur_data["input_labels"][step]))
                             self.logger.info("token_type_ids \n{}".format(cur_data["token_type_ids"][step]))
-                        # ver. future
+
                         loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
                                                             token_type_ids_list, input_labels_list)
-                        wandb.log({"train_loss":loss})
+                    elif self.cfg.untied or self.cfg.mtrans:
+                        # ---------- training step for untied models / vanilla transformer ----------
+                        batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
+                                                            non_blocking=self.cfg.cuda_non_blocking)
+                        video_feature = batched_data["video_feature"]
+                        video_mask = batched_data["video_mask"]
+                        text_ids = batched_data["text_ids"]
+                        text_mask = batched_data["text_mask"]
+                        text_labels = batched_data["text_labels"]
+
+                        if self.cfg.debug:
+                            self.logger.info("text_ids \n{}".format(batched_data["text_ids"][step]))
+                            self.logger.info("text_mask \n{}".format(batched_data["text_mask"][step]))
+                            self.logger.info("text_labels \n{}".format(batched_data["text_labels"][step]))
+                        loss, pred_scores = self.model(video_feature, video_mask, text_ids, text_mask, text_labels)
+                        # make it consistent with other configs
+                        pred_scores_list = [pred_scores]
+                        input_labels_list = [text_labels]
+                    else:
+                        # ---------- non-recurrent MART and maybe others ----------
+                        batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
+                                                            non_blocking=self.cfg.cuda_non_blocking)
+                        input_ids = batched_data["input_ids"]
+                        video_features = batched_data["video_feature"]
+                        input_masks = batched_data["input_mask"]
+                        token_type_ids = batched_data["token_type_ids"]
+                        input_labels = batched_data["input_labels"]
+
+                        if self.cfg.debug:
+                            self.logger.info("input_ids \n{}".format(batched_data["input_ids"][step]))
+                            self.logger.info("input_mask \n{}".format(batched_data["input_mask"][step]))
+                            self.logger.info("input_labels \n{}".format(batched_data["input_labels"][step]))
+                            self.logger.info("token_type_ids \n{}".format(batched_data["token_type_ids"][step]))
+
+                        # forward & backward
+                        loss, pred_scores = self.model(input_ids, video_features, input_masks, token_type_ids,
+                                                       input_labels)
+
+                        # make it consistent with other configs
+                        pred_scores_list = [pred_scores]
+                        input_labels_list = [input_labels]
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -426,20 +458,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                     token_type_ids_list = [e["token_type_ids"] for e in
                                            batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-                    future_clips = [e["future_clips"] for e in batched_data]
-                    # clips_feature = [e["clips_feature"] for e in batched_data]
-                    # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                    #                                     token_type_ids_list, input_labels_list, clips_feature)
-                    # ver. original
-                    # loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
-                    #                                     token_type_ids_list, input_labels_list)
-                    # ver. future
                     loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
                                                         token_type_ids_list, input_labels_list)
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
-
                     model_inputs = [
                         [e["input_ids"] for e in batched_data],
                         [e["video_feature"] for e in batched_data],
@@ -461,6 +484,63 @@ class MartTrainer(trainer_base.BaseTrainer):
                                 "gt_sentence": cur_meta["gt_sentence"][step_idx]})
                     if self.cfg.debug:
                         print(f"Vid feat {[v.mean().item() for v in video_features_list]}")
+                elif self.cfg.untied or self.cfg.mtrans:
+                    # single sentence model MART untied or Vanilla Transformer
+                    meta = batch[2]  # list(dict), len == bsz
+
+                    # validate
+                    batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
+                                                        non_blocking=self.cfg.cuda_non_blocking)
+                    video_feature = batched_data["video_feature"]
+                    video_mask = batched_data["video_mask"]
+                    text_ids = batched_data["text_ids"]
+                    text_mask = batched_data["text_mask"]
+                    text_labels = batched_data["text_labels"]
+
+                    loss, pred_scores = self.model(video_feature, video_mask, text_ids, text_mask, text_labels)
+                    pred_scores_list = [pred_scores]
+                    input_labels_list = [text_labels]
+
+                    # translate
+                    model_inputs = [batched_data["video_feature"], batched_data["video_mask"], batched_data["text_ids"],
+                                    batched_data["text_mask"], batched_data["text_labels"]]
+
+                    dec_seq = self.translator.translate_batch(
+                        model_inputs, use_beam=self.cfg.use_beam, recurrent=False, untied=True)
+                    for example_idx, (cur_gen_sen, cur_meta) in enumerate(zip(dec_seq, meta)):
+                        # example_idx indicates which example is in the batch
+                        cur_data = {
+                            "sentence": dataset.convert_ids_to_sentence(cur_gen_sen.cpu().tolist()),
+                            # remove encoding .encode("utf-8"), "ascii", "ignore"),
+                            "timestamp": cur_meta["timestamp"], "gt_sentence": cur_meta["gt_sentence"]}
+                        batch_res["results"][cur_meta["name"]].append(cur_data)
+                else:
+                    # non-recurrent but also not untied model (?)
+                    meta = batch[2]  # list(dict), len == bsz
+
+                    # validate
+                    batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
+                                                        non_blocking=self.cfg.cuda_non_blocking)
+                    input_ids = batched_data["input_ids"]
+                    video_features = batched_data["video_feature"]
+                    input_masks = batched_data["input_mask"]
+                    token_type_ids = batched_data["token_type_ids"]
+                    input_labels = batched_data["input_labels"]
+                    loss, pred_scores = self.model(input_ids, video_features, input_masks, token_type_ids, input_labels)
+                    pred_scores_list = [pred_scores]
+                    input_labels_list = [input_labels]
+                    # translate
+                    model_inputs = [batched_data["input_ids"], batched_data["video_feature"],
+                                    batched_data["input_mask"], batched_data["token_type_ids"]]
+                    dec_seq = self.translator.translate_batch(
+                        model_inputs, use_beam=self.cfg.use_beam, recurrent=False, untied=False)
+                    for example_idx, (cur_gen_sen, cur_meta) in enumerate(zip(dec_seq, meta)):
+                        # example_idx indicates which example is in the batch
+                        cur_data = {
+                            "sentence": dataset.convert_ids_to_sentence(cur_gen_sen.cpu().tolist()),
+                            # remove encoding .encode("utf-8"), "ascii", "ignore"),
+                            "timestamp": cur_meta["timestamp"], "gt_sentence": cur_meta["gt_sentence"]}
+                        batch_res["results"][cur_meta["name"]].append(cur_data)
 
                 # keep logs
                 n_correct = 0

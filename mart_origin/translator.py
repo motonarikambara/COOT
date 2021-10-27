@@ -199,8 +199,8 @@ class Translator(object):
             return dec_res_list
 
     def translate_batch_greedy(self, input_ids_list, video_features_list, input_masks_list, token_type_ids_list,
-                               rt_model): 
-        def greedy_decoding_step(input_ids, video_features, input_masks, token_type_ids,
+                               rt_model):
+        def greedy_decoding_step(prev_ms_, input_ids, video_features, input_masks, token_type_ids,
                                  model, max_v_len, max_t_len, start_idx=RCDataset.BOS, unk_idx=RCDataset.UNK):
             """
             RTransformer The first few args are the same to the input to the forward_step func
@@ -219,16 +219,25 @@ class Translator(object):
                 input_masks[:, dec_idx] = 1
                 # if dec_idx < max_v_len + 5:
                 #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
-                _, pred_scores = model.forward_step(
-                    input_ids, video_features, input_masks, token_type_ids)
+                copied_prev_ms = copy.deepcopy(prev_ms_)  # since the func is changing data inside
+                _, _, pred_scores = model.forward_step(
+                    copied_prev_ms, input_ids, video_features, input_masks, token_type_ids)
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
                 # next_words = pred_scores.max(2)[1][:, dec_idx]
                 next_words = pred_scores[:, dec_idx].max(1)[1]
                 next_symbols = next_words
 
+            # compute memory, mimic the way memory is generated at training time
+            input_ids, input_masks = mask_tokens_after_eos(input_ids, input_masks)
+            cur_ms, _, pred_scores = model.forward_step(
+                prev_ms_, input_ids, video_features, input_masks, token_type_ids)
 
-            return input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
+            # logger.info("input_ids[:, max_v_len:] {}".format(input_ids[:, max_v_len:]))
+            # import sys
+            # sys.exit(1)
+
+            return cur_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
 
         input_ids_list, input_masks_list = self.prepare_video_only_inputs(
             input_ids_list, input_masks_list, token_type_ids_list)
@@ -238,11 +247,12 @@ class Translator(object):
 
         config = rt_model.cfg
         with torch.no_grad():
+            prev_ms = [None] * config.num_hidden_layers
             step_size = len(input_ids_list)
             dec_seq_list = []
             for idx in range(step_size):
-                dec_seq = greedy_decoding_step(
-                    input_ids_list[idx], video_features_list[idx],
+                prev_ms, dec_seq = greedy_decoding_step(
+                    prev_ms, input_ids_list[idx], video_features_list[idx],
                     input_masks_list[idx], token_type_ids_list[idx],
                     rt_model, config.max_v_len, config.max_t_len)
                 dec_seq_list.append(dec_seq)
@@ -393,11 +403,23 @@ class Translator(object):
                 raise NotImplementedError
         else:
             if recurrent:
-                # input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
-                # future
                 input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
-                return self.translate_batch_greedy(
-                    input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)
+                if xl:
+                    return self.translate_batch_greedy_xl(
+                        input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)
+                else:
+                    return self.translate_batch_greedy(
+                        input_ids_list, video_features_list, input_masks_list, token_type_ids_list, self.model)
+            else:  # single sentence
+                if untied or mtrans:
+                    video_features, video_masks, text_input_ids, text_masks, text_input_labels = model_inputs
+                    return self.translate_batch_single_sentence_untied_greedy(
+                        video_features, video_masks, text_input_ids, text_masks, text_input_labels, self.model)
+                else:
+                    input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
+                    return self.translate_batch_single_sentence_greedy(
+                        input_ids_list, video_features_list, input_masks_list, token_type_ids_list,
+                        self.model)
 
     @classmethod
     def prepare_video_only_inputs(cls, input_ids, input_masks, segment_ids):
@@ -433,5 +455,4 @@ class Translator(object):
         final_res_dict = {}
         for k, v in list(res_dict.items()):
             final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"][0]))
-            # final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"]))
         return final_res_dict
