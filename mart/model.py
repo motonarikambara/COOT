@@ -66,21 +66,6 @@ def create_mart_model(cfg: MartConfig, vocab_size: int, cache_dir: str = MartPat
         else:
             logger.info("Use recurrent model - Mine")
             model = RecursiveTransformer(cfg)
-    else:  # single sentence, including untied
-        print("recurrent should be True")
-        sys.exit()
-        if cfg.untied:
-            logger.info("Use untied non-recurrent single sentence model")
-            model = NonRecurTransformerUntied(cfg)
-        elif cfg.mtrans:
-            logger.info(
-                "Use masked transformer -- another non-recurrent "
-                "single sentence model")
-            model = MTransformer(cfg)
-        else:
-            logger.info("Use non-recurrent single sentence model")
-            model = NonRecurTransformer(cfg)
-
     if cfg.use_glove:
         if hasattr(model, "embeddings"):
             logger.info("Load GloVe as word embedding")
@@ -761,8 +746,8 @@ class MemoryUpdater(nn.Module):
         self.mc = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.sc = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
 
-        self.mz = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-        self.sz = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
+        # self.mz = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # self.sz = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
 
     def forward(self, prev_m, input_states, attention_mask):
         """
@@ -781,9 +766,10 @@ class MemoryUpdater(nn.Module):
 
         c_t = torch.tanh(self.mc(prev_m) + self.sc(s_t))  # (N, M, D)
 
-        z_t = torch.sigmoid(self.mz(prev_m) + self.sz(s_t))  # (N, M, D)
+        # z_t = torch.sigmoid(self.mz(prev_m) + self.sz(s_t))  # (N, M, D)
 
-        updated_memory = (1 - z_t) * c_t + z_t * prev_m  # (N, M, D)
+        # updated_memory = (1 - z_t) * c_t + z_t * prev_m  # (N, M, D)
+        updated_memory = 0.5 * c_t + 0.5 * prev_m  # (N, M, D)
         return updated_memory
 
 
@@ -1402,13 +1388,6 @@ class RecursiveTransformer(nn.Module):
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        # self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
-        self.future_linear = nn.Sequential(nn.Linear(384, 786),
-                                            nn.ReLU(),
-                                            nn.Linear(786, 384),
-                                            nn.ReLU(),
-                                            nn.Dropout(0.2))
-        self.future_loss = nn.MSELoss()
 
         self.apply(self.init_bert_weights)
 
@@ -1438,14 +1417,6 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
-    # ver. LSTM
-    # def forward(self, input_ids_list, video_features_list, input_masks_list,
-    #             token_type_ids_list, input_labels_list, clips_feature, return_memory=False):
-
-    # ver. original
-    # def forward(self, input_ids_list, video_features_list, input_masks_list,
-    #             token_type_ids_list, input_labels_list, return_memory=False):
-
     #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
                 token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
@@ -1471,19 +1442,9 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         future_loss = 0
         for idx in range(step_size):
-            # self.lstm.flatten_parameters()
-
-            # clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
-            # clip_feature = clips[: , -1, :].view(-1, 1, 384)
-            # video_features_list[idx][:, :, 768:1152] = clip_feature
-            tmp_clip = self.future_linear(video_features_list[idx])
-            future_loss += self.future_loss(tmp_clip, gt_clip[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
-            self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
+            self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
                                 input_masks_list[idx], token_type_ids_list[idx])           
-            # prev_ms, encoded_layer_outputs, prediction_scores =\
-            #     self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
-            #                       input_masks_list[idx], token_type_ids_list[idx])
 
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
@@ -1497,6 +1458,5 @@ class RecursiveTransformer(nn.Module):
             for idx in range(step_size):
                 tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
-                caption_loss += 0.1 * tmp_loss
-                caption_loss += future_loss
+                caption_loss += tmp_loss
             return caption_loss, prediction_scores_list

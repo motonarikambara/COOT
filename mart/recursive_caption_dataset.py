@@ -181,8 +181,8 @@ class RecursiveCaptionDataset(data.Dataset):
             else:
                 # new version, everything in the h5
                 # decode video ids from byte to utf8
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                vid_ids = [key for key in data_file["key"]]
+                vid_ids = [key.decode("utf8") for key in data_file["key"]]
+                # vid_ids = [key for key in data_file["key"]]
 
                 # load clip information
                 clip_nums = data_file["clip_num"]
@@ -295,10 +295,6 @@ class RecursiveCaptionDataset(data.Dataset):
         # clip_feats.append(clip_feat)
         clip_feats = np.stack(clip_feats, axis=0)
         future_clip = np.stack(future_clip, axis=0)
-        # ver. origin
-        # return vid_feat, vidctx_feat, clip_feats
-        # ver. lstm
-        # return vid_feat, vidctx_feat, clip_feats, clip_vid
         # ver. future
         return clip_feats, future_clip
 
@@ -366,8 +362,6 @@ class RecursiveCaptionDataset(data.Dataset):
         if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
             frm2sec = self.frame_to_second[name[2:]] if self.dset_name == "activitynet" else self.frame_to_second[name]
 
-        # video + text tokens
-        # feat, video_tokens, video_mask = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx)
         # future
         feat, video_tokens, video_mask, future_clip = self._load_indexed_video_feature(video_feature, timestamp, frm2sec, clip_idx, future_clip)
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
@@ -380,17 +374,6 @@ class RecursiveCaptionDataset(data.Dataset):
             input_ids[-len(text_mask):], text_mask)][1:] + [self.IGNORE]
         input_mask = video_mask + text_mask
         token_type_ids = [0] * self.max_v_len + [1] * self.max_t_len
-
-        # ver. lstm
-        # coll_data = dict(
-        #     name=name, input_tokens=input_tokens, input_ids=np.array(input_ids).astype(np.int64),
-        #     input_labels=np.array(input_labels).astype(np.int64), input_mask=np.array(input_mask).astype(np.float32),
-        #     token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32), clips_feature=clip_vid.astype(np.float32))
-        # ver. original
-        # coll_data = dict(
-        #     name=name, input_tokens=input_tokens, input_ids=np.array(input_ids).astype(np.int64),
-        #     input_labels=np.array(input_labels).astype(np.int64), input_mask=np.array(input_mask).astype(np.float32),
-        #     token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32))
         # ver. future
         coll_data = dict(
             name=name, input_tokens=input_tokens, input_ids=np.array(input_ids).astype(np.int64),
