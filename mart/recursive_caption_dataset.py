@@ -128,6 +128,7 @@ class RecursiveCaptionDataset(data.Dataset):
             raise ValueError(f"Unknown dataset {self.dset_name}")
 
         # load and process captions and video data
+        # ここでデータを引っ張ってきている
         raw_data = json.load(data_path.open("rt", encoding="utf8"))
         coll_data = []
         for i, (k, line) in enumerate(tqdm(list(raw_data.items()))):
@@ -202,54 +203,6 @@ class RecursiveCaptionDataset(data.Dataset):
                 self.coot_vid_clip_id_to_clip_number[f"{vid_id}/{clip_id}"] = i
 
             self.frame_to_second = None  # Don't need this for COOT embeddings
-        else:
-            # 以下は使っていない
-            # Video features
-            print("Please check the option")
-            sys.exit()
-            self.data_type = DataTypesConstCaption.VIDEO_FEAT
-
-            # load video duration
-            # Original note: Since the features are extracted not at the exact 0.5 secs. To get the
-            # real time for each feature, use `(idx + 1) * frame_to_second[vid_name] `
-            frame_to_second = {}
-            sampling_sec = 0.5  # hard coded, only support 0.5
-            with open(self.duration_file, "r") as f:
-                for line in f:
-                    vid_name, vid_dur, vid_frame = [entry.strip() for entry in line.split(",")]
-                    if self.dset_name == "activitynet":
-                        frame_to_second[vid_name] = float(vid_dur) * int(float(vid_frame) * 1. / int(
-                            float(vid_dur)) * sampling_sec) * 1. / float(vid_frame)
-                    elif self.dset_name == "youcook2":
-                        frame_to_second[vid_name] = float(vid_dur) * math.ceil(float(vid_frame) * 1. / float(
-                            vid_dur) * sampling_sec) * 1. / float(vid_frame)  # for yc2
-                    else:
-                        raise NotImplementedError(f"Only support activitynet and youcook2, got {self.dset_name}")
-
-            if self.dset_name == "activitynet":
-                frame_to_second["_0CqozZun3U"] = sampling_sec  # a missing video in anet
-
-            # remove missing videos
-            self.missing_video_names = []
-            for e in tqdm(self.data):
-                video_name = e["name"][2:] if self.dset_name == "activitynet" else e["name"]
-                cur_path_resnet = os.path.join(self.video_feature_dir, "{}_resnet.npy".format(video_name))
-                cur_path_bn = os.path.join(self.video_feature_dir, "{}_bn.npy".format(video_name))
-                for p in [cur_path_bn, cur_path_resnet]:
-                    if not os.path.exists(p):
-                        self.missing_video_names.append(video_name)
-            print(f"Missing {len(self.missing_video_names)} features (clips/sentences) "
-                  f"from {len(set(self.missing_video_names))} videos")
-            print(f"Missing {set(self.missing_video_names)}")
-            if self.dset_name == "activitynet":
-                self.data = [e for e in self.data if e["name"][2:] not in self.missing_video_names]
-            elif self.dset_name == "youcook2":
-                self.data = [e for e in self.data if e["name"] not in self.missing_video_names]
-            else:
-                raise ValueError(f"Dataset not understood {self.dset_name}")
-            assert len(self.data) > 0, "No data was found! Video features directory may not be setup correctly."
-
-            self.frame_to_second = frame_to_second
 
         print(f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}")
 
