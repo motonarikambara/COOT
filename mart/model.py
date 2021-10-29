@@ -65,7 +65,7 @@ def create_mart_model(cfg: MartConfig, vocab_size: int, cache_dir: str = MartPat
             sys.exit()
         else:
             logger.info("Use recurrent model - Mine")
-            model = SimpleTransformer(cfg)
+            model = OnlyGenerator(cfg)
 
     if cfg.use_glove:
         if hasattr(model, "embeddings"):
@@ -554,12 +554,12 @@ class BertLMPredictionHead(nn.Module):
         return hidden_states  # (N, L, vocab_size)
 
 
-class SimpleTransformer(nn.Module):
+class OnlyGenerator(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
         self.embeddings = BertEmbeddingsWithVideo(cfg, add_postion_embeddings=True)
-        self.encoder = BertEncoderWithMemory(cfg)
+        # self.encoder = BertEncoderWithMemory(cfg)
         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
             if self.cfg.share_wd_cls_weight else None
         self.decoder = BertLMPredictionHead(cfg, decoder_classifier_weight)
@@ -590,10 +590,10 @@ class SimpleTransformer(nn.Module):
         """
         embeddings = self.embeddings(input_ids, video_features, token_type_ids)  # (N, L, D)
 
-        encoded_layer_outputs = self.encoder(
-            embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
-        prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
-        return encoded_layer_outputs, prediction_scores
+        # encoded_layer_outputs = self.encoder(
+            # embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
+        prediction_scores = self.decoder(embeddings)  # (N, L, vocab_size)
+        return embeddings, prediction_scores
 
     #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
