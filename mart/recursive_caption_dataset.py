@@ -30,6 +30,8 @@ from torch.utils import data
 from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 import sys
+import pandas as pd
+import pickle
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
@@ -108,103 +110,124 @@ class RecursiveCaptionDataset(data.Dataset):
         # ---------- Load metadata ----------
 
         # determine metadata file
-        if self.dset_name == "activitynet":
-            if mode == "train":  # 10000 videos
-                data_path = self.annotations_dir / self.dset_name / "train.json"
-            elif mode == "val":  # 2500 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_val_1.json"
-            elif mode == "test":  # 2500 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_test_1.json"
-            else:
-                raise ValueError(f"Mode must be [train, val, test] for {self.dset_name}, got {mode}")
-        elif self.dset_name == "youcook2":
-            if mode == "train":  # 1333 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_train.json"
-            elif mode == "val":  # 457 videos
-                data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
-            else:
-                raise ValueError(f"Mode must be [train, val] for {self.dset_name}, got {mode}")
-        else:
-            raise ValueError(f"Unknown dataset {self.dset_name}")
+        # if self.dset_name == "activitynet":
+        #     if mode == "train":  # 10000 videos
+        #         data_path = self.annotations_dir / self.dset_name / "train.json"
+        #     elif mode == "val":  # 2500 videos
+        #         data_path = self.annotations_dir / self.dset_name / "captioning_val_1.json"
+        #     elif mode == "test":  # 2500 videos
+        #         data_path = self.annotations_dir / self.dset_name / "captioning_test_1.json"
+        #     else:
+        #         raise ValueError(f"Mode must be [train, val, test] for {self.dset_name}, got {mode}")
+        # elif self.dset_name == "youcook2":
+        #     if mode == "train":  # 1333 videos
+        #         data_path = self.annotations_dir / self.dset_name / "captioning_train.json"
+        #     elif mode == "val":  # 457 videos
+        #         data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
+        #     else:
+        #         raise ValueError(f"Mode must be [train, val] for {self.dset_name}, got {mode}")
+        # else:
+        #     raise ValueError(f"Unknown dataset {self.dset_name}")
 
         # load and process captions and video data
-        # ここでデータを引っ張ってきている
-        raw_data = json.load(data_path.open("rt", encoding="utf8"))
-        coll_data = []
-        for i, (k, line) in enumerate(tqdm(list(raw_data.items()))):
-            if dataset_max is not None and i >= dataset_max > 0:
-                break
-            line["name"] = k
-            # line["timestamps"] = line["timestamps"][:self.max_n_sen]
-            # line["sentences"] = line["sentences"][:self.max_n_sen]
-            coll_data.append(line)
+        # ここで正解キャプションを取得
+        # raw_data = json.load(data_path.open("rt", encoding="utf8"))
+        # coll_data = []
+        # for i, (k, line) in enumerate(tqdm(list(raw_data.items()))):
+        #     if dataset_max is not None and i >= dataset_max > 0:
+        #         break
+        #     line["name"] = k
+        #     # line["timestamps"] = line["timestamps"][:self.max_n_sen]
+        #     # line["sentences"] = line["sentences"][:self.max_n_sen]
+        #     coll_data.append(line)
 
-        if self.recurrent:  # recurrent
-            self.data = coll_data
-        else:  # non-recurrent single sentence
-            single_sentence_data = []
-            for d in coll_data:
-                num_sen = min(self.max_n_sen, len(d["sentences"]))
-                single_sentence_data.extend([
-                    {
-                        "duration": d["duration"],
-                        "name": d["name"],
-                        "timestamp": d["timestamps"][idx],
-                        "sentence": d["sentences"][idx],
-                        "idx": idx
-                    } for idx in range(num_sen)])
-            self.data = single_sentence_data
+        # if self.recurrent:  # recurrent
+        #     self.data = coll_data
+        
+
+        # id_list: video_id, feature_file
+        # raw_data: video_id, end, start, caption
+        # feature_data: feature_file, feature(sec*1024)
+        csv_path = f"./data/youcookii/youcookii_{self.mode}.csv"
+        rawdata_path = "./data/youcookii/youcookii_data.no_transcript.pickle"
+        feature_path = "./data/youcookii/youcookii_videos_features.pickle"
+        id_list = pd.read_csv(csv_path)
+        raw_data = pickle.load(open(rawdata_path, 'rb'))
+        self.feature_data = pickle.load(open(feature_path, 'rb'))
+
+        # default: 1024
+        self.feature_size =\
+            self.feature_data[id_list["feature_file"].values[0]].shape[-1]
+
+        # Get iterator video ids
+        video_id_list = [itm for itm in id_list['video_id'].values]
+        self.video_id2idx_dict =\
+            {video_id: id for id, video_id in enumerate(video_id_list)}
+        self.video2feat =\
+            {video_id: feat_id for i, (video_id, feat_id) in enumerate(id_list)}
+        # Get all captions
+        self.iter2video_pairs_dict = {}
+        iter_idx = 0
+        for video_id in video_id_list:
+            data_dict = raw_data[video_id]
+            n_caption = len(data_dict['start'])
+            for sub_id in range(n_caption):
+                self.iter2video_pairs_dict[iter_idx] = (video_id, sub_id)
+                iter_idx += 1
+        self.data = raw_data
+
+
 
         # ---------- Load video data ----------
 
         # Decide whether to load COOT embeddings or video features
-        if self.coot_model_name is not None:
-            # COOT embeddings
-            self.data_type = DataTypesConstCaption.COOT_EMB
+        # if self.coot_model_name is not None:
+        #     # COOT embeddings
+        #     self.data_type = DataTypesConstCaption.COOT_EMB
 
-            # for activitynet, coot val split contains both ae-val and ae-test splits
-            coot_dataset_mode = "val" if self.mode == "test" else self.mode
+        #     # for activitynet, coot val split contains both ae-val and ae-test splits
+        #     coot_dataset_mode = "val" if self.mode == "test" else self.mode
 
-            self.coot_emb_h5_file = self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
-            assert self.coot_emb_h5_file.is_file(), f"Coot embeddings file not found: {self.coot_emb_h5_file}"
+        #     self.coot_emb_h5_file = self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
+        #     assert self.coot_emb_h5_file.is_file(), f"Coot embeddings file not found: {self.coot_emb_h5_file}"
 
-            # load coot embeddings data
-            data_file = h5py.File(self.coot_emb_h5_file, "r")
+        #     # load coot embeddings data
+        #     data_file = h5py.File(self.coot_emb_h5_file, "r")
 
-            if "key" not in data_file:
-                # backwards compatible to old h5+json embeddings
-                vtdata = json.load((self.coot_feat_dir / f"{self.coot_model_name}_{mode}.json").open(
-                    "rt", encoding="utf8"))
-                clip_nums = vtdata["clip_nums"]
-                vid_ids = vtdata["vid_ids"]
-                clip_ids = vtdata["clip_ids"]
-            else:
-                # new version, everything in the h5
-                # decode video ids from byte to utf8
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                vid_ids = [key for key in data_file["key"]]
+        #     if "key" not in data_file:
+        #         # backwards compatible to old h5+json embeddings
+        #         vtdata = json.load((self.coot_feat_dir / f"{self.coot_model_name}_{mode}.json").open(
+        #             "rt", encoding="utf8"))
+        #         clip_nums = vtdata["clip_nums"]
+        #         vid_ids = vtdata["vid_ids"]
+        #         clip_ids = vtdata["clip_ids"]
+        #     else:
+        #         # new version, everything in the h5
+        #         # decode video ids from byte to utf8
+        #         # vid_ids = [key.decode("utf8") for key in data_file["key"]]
+        #         vid_ids = [key for key in data_file["key"]]
 
-                # load clip information
-                clip_nums = data_file["clip_num"]
-                clip_ids = []
-                assert len(vid_ids) == len(clip_nums)
-                for vid_id, clip_num in zip(vid_ids, clip_nums):
-                    for c in range(clip_num):
-                        clip_ids.append((vid_id, c))
-            self.coot_clip_nums = np.array(clip_nums)
-            # map video id to video number
-            self.coot_vid_id_to_vid_number = {}
-            for i, vid_id in enumerate(vid_ids):
-                self.coot_vid_id_to_vid_number[vid_id] = i
+        #         # load clip information
+        #         clip_nums = data_file["clip_num"]
+        #         clip_ids = []
+        #         assert len(vid_ids) == len(clip_nums)
+        #         for vid_id, clip_num in zip(vid_ids, clip_nums):
+        #             for c in range(clip_num):
+        #                 clip_ids.append((vid_id, c))
+        #     self.coot_clip_nums = np.array(clip_nums)
+        #     # map video id to video number
+        #     self.coot_vid_id_to_vid_number = {}
+        #     for i, vid_id in enumerate(vid_ids):
+        #         self.coot_vid_id_to_vid_number[vid_id] = i
 
-            # map video id and clip id to clip number
-            self.coot_vid_clip_id_to_clip_number = {}
-            for i, (vid_id, clip_id) in enumerate(clip_ids):
-                self.coot_vid_clip_id_to_clip_number[f"{vid_id}/{clip_id}"] = i
+        #     # map video id and clip id to clip number
+        #     self.coot_vid_clip_id_to_clip_number = {}
+        #     for i, (vid_id, clip_id) in enumerate(clip_ids):
+        #         self.coot_vid_clip_id_to_clip_number[f"{vid_id}/{clip_id}"] = i
 
-            self.frame_to_second = None  # Don't need this for COOT embeddings
+        #     self.frame_to_second = None  # Don't need this for COOT embeddings
 
-        print(f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}")
+        # print(f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}")
 
         self.preloading_done = False
 
@@ -232,63 +255,78 @@ class RecursiveCaptionDataset(data.Dataset):
         feat_path_bn = os.path.join(self.video_feature_dir, "{}_bn.npy".format(video_name))
         video_feature = np.concatenate([np.load(feat_path_resnet), np.load(feat_path_bn)], axis=1)
         return video_feature
-
-    def _load_coot_video_feature(self, raw_name: str) -> Tuple[np.array, np.array, List[np.array]]:
+    
+    def _load_clip_features(self, raw_name: str) -> np.array:
         """
-        Load given COOT video features.
+        Load given mart video feature
 
         Args:
             raw_name: Video ID
 
         Returns:
-            Tuple of:
-                video with shape (dim_video)
-                context with shape (dim_clip)
-                clips with shape (dim_clip)
+            clips feature with shape (len_sequence, 1024)
         """
-        if self.preload and self.preloading_done:
-            return self.preloaded_videos[raw_name]
-        try:
-            # load video with default name
-            vid_num = self.coot_vid_id_to_vid_number[raw_name]
-            fixed_name = raw_name
-        except KeyError:
-            # not found, have to modify the name for activitynet
-            mode = "val_1" if self.mode == "val" else self.mode
-            fixed_name = f"{raw_name[2:]}_{mode}"
-            vid_num = self.coot_vid_id_to_vid_number[fixed_name]
-        h5 = h5py.File(self.coot_emb_h5_file, "r")
+        video_feat = self.feature_data[self.video2feat[raw_name]]
+        for clip_idx in range(len()):
 
-        if "vid_emb" not in h5:
-            # backwards compatibility
-            embs = ['vid_norm', 'vid', 'clip_norm', 'clip', 'vid_ctx_norm', 'vid_ctx',
-                    'par_norm', 'par', 'sent_norm', 'sent', 'par_ctx_norm', 'par_ctx']
-            (f_vid_emb, f_vid_emb_before_norm, f_clip_emb, f_clip_emb_before_norm,
-             f_vid_context, f_vid_context_before_norm,
-             f_par_emb, f_par_emb_before_norm, f_sent_emb, f_sent_emb_before_norm,
-             f_par_context, f_par_context_before_norm) = embs
-        else:
-            # new version
-            f_vid_emb, f_clip_emb, f_vid_context, f_par_emb, f_sent_emb, f_par_context = [
-                'vid_emb', 'clip_emb', 'vid_context', 'par_emb', 'sent_emb', 'par_context']
+        return clips_feat
 
-        # 動画に関する特徴量を取得
-        vid_feat = np.array(h5[f_vid_emb][vid_num])
-        vidctx_feat = np.array(h5[f_vid_context][vid_num])
-        num_clips = self.coot_clip_nums[vid_num]
-        clip_feats = []
-        clip_vid = np.zeros((15, 1, 384))
-        for clip in range(num_clips-1):
-            clip_num = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{clip}"]
-            clip_feat = np.array(h5[f_clip_emb][clip_num])
-            clip_vid[clip, 0, :] = clip_feat
-            clip_feats.append(clip_feat)
-        clip_feat = np.array(h5[f_clip_emb][0])
-        # if 全てのクリップ
-        # clip_feats.append(clip_feat)
-        clip_feats = np.stack(clip_feats, axis=0)
-        return vid_feat, vidctx_feat, clip_feats
-        # return vid_feat, vidctx_feat, clip_feats, clip_vid
+    # def _load_coot_video_feature(self, raw_name: str) -> Tuple[np.array, np.array, List[np.array]]:
+    #     """
+    #     Load given COOT video features.
+
+    #     Args:
+    #         raw_name: Video ID
+
+    #     Returns:
+    #         Tuple of:
+    #             video with shape (dim_video)
+    #             context with shape (dim_clip)
+    #             clips with shape (dim_clip)
+    #     """
+    #     if self.preload and self.preloading_done:
+    #         return self.preloaded_videos[raw_name]
+    #     try:
+    #         # load video with default name
+    #         vid_num = self.coot_vid_id_to_vid_number[raw_name]
+    #         fixed_name = raw_name
+    #     except KeyError:
+    #         # not found, have to modify the name for activitynet
+    #         mode = "val_1" if self.mode == "val" else self.mode
+    #         fixed_name = f"{raw_name[2:]}_{mode}"
+    #         vid_num = self.coot_vid_id_to_vid_number[fixed_name]
+    #     h5 = h5py.File(self.coot_emb_h5_file, "r")
+
+    #     if "vid_emb" not in h5:
+    #         # backwards compatibility
+    #         embs = ['vid_norm', 'vid', 'clip_norm', 'clip', 'vid_ctx_norm', 'vid_ctx',
+    #                 'par_norm', 'par', 'sent_norm', 'sent', 'par_ctx_norm', 'par_ctx']
+    #         (f_vid_emb, f_vid_emb_before_norm, f_clip_emb, f_clip_emb_before_norm,
+    #          f_vid_context, f_vid_context_before_norm,
+    #          f_par_emb, f_par_emb_before_norm, f_sent_emb, f_sent_emb_before_norm,
+    #          f_par_context, f_par_context_before_norm) = embs
+    #     else:
+    #         # new version
+    #         f_vid_emb, f_clip_emb, f_vid_context, f_par_emb, f_sent_emb, f_par_context = [
+    #             'vid_emb', 'clip_emb', 'vid_context', 'par_emb', 'sent_emb', 'par_context']
+
+    #     # 動画に関する特徴量を取得
+    #     vid_feat = np.array(h5[f_vid_emb][vid_num])
+    #     vidctx_feat = np.array(h5[f_vid_context][vid_num])
+    #     num_clips = self.coot_clip_nums[vid_num]
+    #     clip_feats = []
+    #     clip_vid = np.zeros((15, 1, 384))
+    #     for clip in range(num_clips-1):
+    #         clip_num = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{clip}"]
+    #         clip_feat = np.array(h5[f_clip_emb][clip_num])
+    #         clip_vid[clip, 0, :] = clip_feat
+    #         clip_feats.append(clip_feat)
+    #     clip_feat = np.array(h5[f_clip_emb][0])
+    #     # if 全てのクリップ
+    #     # clip_feats.append(clip_feat)
+    #     clip_feats = np.stack(clip_feats, axis=0)
+    #     return vid_feat, vidctx_feat, clip_feats
+    #     # return vid_feat, vidctx_feat, clip_feats, clip_vid
 
     def convert_example_to_features(self, example):
         """
@@ -314,9 +352,6 @@ class RecursiveCaptionDataset(data.Dataset):
             # vid_feat, vidctx_feat, clip_feats, clip_vid = self._load_coot_video_feature(raw_name)
             # video_feature = vid_feat, vidctx_feat, clip_feats
 
-        # print("loaded features", name, video_name, video_feature.shape)
-        # print(video_feature)
-        # sys.exit()
 
         if self.recurrent:
             # recurrent
@@ -336,9 +371,6 @@ class RecursiveCaptionDataset(data.Dataset):
             single_video_meta.append(cur_meta)
             # single_video_features: video特徴量を含むdict
             return single_video_features, single_video_meta
-        else:
-            print("recursive_caption_dataset.py")
-            sys.exit()
 
     def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_idx: int):
     # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_vid):
@@ -381,6 +413,7 @@ class RecursiveCaptionDataset(data.Dataset):
             token_type_ids=np.array(token_type_ids).astype(np.int64), video_feature=feat.astype(np.float32))
         meta = dict(
             name=name, timestamp=timestamp, sentence=sentence, )
+        # x: coll_data, y: meta
         return coll_data, meta
 
     @classmethod
