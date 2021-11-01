@@ -19,6 +19,7 @@ from torch import nn
 from torch.cuda.amp import autocast
 from torch.utils import data
 from tqdm import tqdm
+from torchsummary import summary
 
 from coot.configs_retrieval import ExperimentTypesConst
 from mart.caption_eval_tools import get_reference_files
@@ -250,6 +251,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             if self.ema is not None and self.state.current_epoch != 0 and self.cfg.ema_decay != -1:
                 # use normal parameters for training, not EMA model
                 self.ema.resume(self.model)
+            # summary(self.model, [16, 25, 768])
 
             th.autograd.set_detect_anomaly(True)
 
@@ -297,49 +299,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                         loss, pred_scores_list = self.model(input_ids_list, video_features_list, input_masks_list,
                                                             token_type_ids_list, input_labels_list, future_clip)
                         wandb.log({"train_loss":loss})
-                    elif self.cfg.untied or self.cfg.mtrans:
-                        sys.exit()
-                        # ---------- training step for untied models / vanilla transformer ----------
-                        batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
-                                                            non_blocking=self.cfg.cuda_non_blocking)
-                        video_feature = batched_data["video_feature"]
-                        video_mask = batched_data["video_mask"]
-                        text_ids = batched_data["text_ids"]
-                        text_mask = batched_data["text_mask"]
-                        text_labels = batched_data["text_labels"]
-
-                        if self.cfg.debug:
-                            self.logger.info("text_ids \n{}".format(batched_data["text_ids"][step]))
-                            self.logger.info("text_mask \n{}".format(batched_data["text_mask"][step]))
-                            self.logger.info("text_labels \n{}".format(batched_data["text_labels"][step]))
-                        loss, pred_scores = self.model(video_feature, video_mask, text_ids, text_mask, text_labels)
-                        # make it consistent with other configs
-                        pred_scores_list = [pred_scores]
-                        input_labels_list = [text_labels]
-                    else:
-                        sys.exit()
-                        # ---------- non-recurrent MART and maybe others ----------
-                        batched_data = prepare_batch_inputs(batch[0], use_cuda=self.cfg.use_cuda,
-                                                            non_blocking=self.cfg.cuda_non_blocking)
-                        input_ids = batched_data["input_ids"]
-                        video_features = batched_data["video_feature"]
-                        input_masks = batched_data["input_mask"]
-                        token_type_ids = batched_data["token_type_ids"]
-                        input_labels = batched_data["input_labels"]
-
-                        if self.cfg.debug:
-                            self.logger.info("input_ids \n{}".format(batched_data["input_ids"][step]))
-                            self.logger.info("input_mask \n{}".format(batched_data["input_mask"][step]))
-                            self.logger.info("input_labels \n{}".format(batched_data["input_labels"][step]))
-                            self.logger.info("token_type_ids \n{}".format(batched_data["token_type_ids"][step]))
-
-                        # forward & backward
-                        loss, pred_scores = self.model(input_ids, video_features, input_masks, token_type_ids,
-                                                       input_labels)
-
-                        # make it consistent with other configs
-                        pred_scores_list = [pred_scores]
-                        input_labels_list = [input_labels]
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 

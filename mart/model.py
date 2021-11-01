@@ -308,54 +308,6 @@ def make_video_only_mask(input_mask, max_v_len):
     return video_only_mask
 
 
-class BertLayerNoMemory(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.attention = BertAttention(config)
-        self.hidden_intermediate = BertIntermediate(config)
-        self.memory_intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
-
-    def forward(self, hidden_states, attention_mask):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-        Returns:
-        """
-        max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
-        # self-attention, need to shift right
-        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len, max_t_len)  # (N, L, L)
-        attention_output = self.attention(hidden_states, shifted_self_mask)  # (N, L, D)
-        intermediate_output = self.hidden_intermediate(attention_output)  # (N, L, D)
-        layer_output = self.output(intermediate_output, attention_output)  # (N, L, D)
-        return layer_output
-
-
-class BertEncoderNoMemory(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.layer = nn.ModuleList([BertLayerNoMemory(config) for _ in range(config.num_hidden_layers)])
-
-    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-            output_all_encoded_layers:
-
-        Returns:
-        """
-        all_encoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, attention_mask)
-            if output_all_encoded_layers:
-                all_encoder_layers.append(hidden_states)
-        if not output_all_encoded_layers:
-            all_encoder_layers.append(hidden_states)
-        return all_encoder_layers
-
 
 class BertLayerWithMemory(nn.Module):
     def __init__(self, config):
@@ -379,7 +331,7 @@ class BertLayerWithMemory(nn.Module):
         """
         max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
         # self-attention, need to shift right
-        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len, max_t_len)  # (N, L, L)
+        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len * 2, max_t_len * 2)  # (N, L, L)
         attention_output = self.attention(hidden_states, shifted_self_mask)
         intermediate_output = self.hidden_intermediate(attention_output)
 
@@ -465,7 +417,7 @@ class BertEmbeddingsWithVideo(nn.Module):
 
         if self.add_postion_embeddings:
             self.position_embeddings = PositionEncoding(n_filters=config.hidden_size,
-                                                        max_len=config.max_position_embeddings)
+                                                        max_len=config.max_position_embeddings * 2)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
@@ -494,208 +446,16 @@ class BertEmbeddingsWithVideo(nn.Module):
         video_embeddings = self.video_embeddings(video_features)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
-        embeddings = words_embeddings + video_embeddings + token_type_embeddings
+        words_embeddings += token_type_embeddings
+        # embeddings = words_embeddings + video_embeddings + token_type_embeddings
+        embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
+
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
 
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings  # (N, L, D)
-
-
-class BertEmbeddingsTextUntied(nn.Module):
-    """
-    Construct the embeddings from word and video, separately. position and token_type embeddings.
-    input_ids (batch_size, sequence_length), with [1, sequence_length_1 + 1] filled with [VID]
-    video_features (batch_size, sequence_length),
-    with [1, sequence_length_1 + 1] as real features, others as zeros
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        self.word_embeddings = nn.Embedding(config.vocab_size, config.word_vec_size, padding_idx=0)
-        self.word_fc = nn.Sequential(
-            BertLayerNorm(config.word_vec_size, eps=config.layer_norm_eps),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.word_vec_size, config.hidden_size),
-            nn.ReLU(True),
-            BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps),
-        )
-        self.position_embeddings_text = PositionEncoding(n_filters=config.hidden_size,
-                                                         max_len=config.max_position_embeddings)
-
-    def set_pretrained_embedding(self, pretrained_embedding, freeze=True):
-        """
-        Note the from_pretrained does not work in-place, so you need to assign value to the embedding
-        """
-        assert pretrained_embedding.shape == self.word_embeddings.weight.shape  # ensure equal shape
-        self.word_embeddings = nn.Embedding.from_pretrained(pretrained_embedding, freeze=freeze,
-                                                            padding_idx=self.word_embeddings.padding_idx)
-
-    def forward(self, text_input_ids):
-        """
-        text_input_ids: (N, Lt)
-        """
-        words_embeddings = self.word_fc(self.word_embeddings(text_input_ids))  # (N, Lt, D)
-        words_embeddings = self.position_embeddings_text(words_embeddings)
-        return words_embeddings  # (N, Lt, D)
-
-
-class BertEmbeddingsVideoUntied(nn.Module):
-    """
-    Construct the embeddings from word and video, separately. position and token_type embeddings.
-    input_ids (batch_size, sequence_length), with [1, sequence_length_1 + 1] filled with [VID]
-    video_features (batch_size, sequence_length),
-    with [1, sequence_length_1 + 1] as real features, others as zeros
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        self.video_embeddings = nn.Sequential(
-            BertLayerNorm(config.video_feature_size, eps=config.layer_norm_eps),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.video_feature_size, config.hidden_size),
-            nn.ReLU(True),
-            BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps),
-        )
-        self.position_embeddings_video = PositionEncoding(n_filters=config.hidden_size,
-                                                          max_len=config.max_position_embeddings)
-
-    def forward(self, video_features):
-        """
-        video_features: (N, Lv, D)
-        """
-        video_embeddings = self.video_embeddings(video_features)  # (N, Lv, D)
-        video_embeddings = self.position_embeddings_video(video_embeddings)
-        return video_embeddings  # (N, Lv, D)
-
-
-class BertLayerNoMemoryUntied(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.attention = BertAttention(config)
-        self.hidden_intermediate = BertIntermediate(config)
-        self.memory_intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
-
-    def forward(self, hidden_states, attention_mask, diagonal_mask=False):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-            diagonal_mask: bool, if True mask subsequent words to preserve auto-regressive property.
-        Returns:
-        """
-        self_attention_mask = attention_mask.unsqueeze(1)
-        if diagonal_mask:  # mask subsequent words
-            max_len = hidden_states.size(1)
-            self_attention_mask = self_attention_mask * torch.tril(
-                self_attention_mask.new_ones(max_len, max_len), diagonal=0)
-        attention_output = self.attention(hidden_states, self_attention_mask)  # (N, L, D)
-        intermediate_output = self.hidden_intermediate(attention_output)  # (N, L, D)
-        layer_output = self.output(intermediate_output, attention_output)  # (N, L, D)
-        return layer_output
-
-
-class BertEncoderNoMemoryUntied(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.layer = nn.ModuleList([BertLayerNoMemoryUntied(config) for _ in range(config.num_hidden_layers)])
-
-    def forward(self, hidden_states, attention_mask, diagonal_mask=False, output_all_encoded_layers=True):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-            diagonal_mask: bool, if True mask subsequent words to preserve auto-regressive property.
-            output_all_encoded_layers:
-
-        Returns:
-        """
-        all_encoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, attention_mask, diagonal_mask)
-            if output_all_encoded_layers:
-                all_encoder_layers.append(hidden_states)
-        if not output_all_encoded_layers:
-            all_encoder_layers.append(hidden_states)
-        return all_encoder_layers
-
-
-class BertDecoderLayerNoMemoryUntied(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.self_attention = BertSelfAttention(config)
-        self.norm1 = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dec_enc_attention = BertSelfAttention(config)
-        self.norm2 = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.output = BertOutput(config)  # linear + residual + layernorm
-
-    def forward(self, dec_hidden_states, dec_mask, enc_outputs, enc_mask, diagonal_mask=True):
-        """
-        Args:
-            dec_hidden_states: (N, Lt, D)
-            dec_mask: (N, Lt)
-            enc_outputs: (N, Lv, D)
-            enc_mask: (N, Lv)
-            diagonal_mask: bool, if True mask subsequent words to preserve auto-regressive property.
-        Returns:
-        """
-        self_attention_mask = dec_mask.unsqueeze(1)
-        if diagonal_mask:  # mask subsequent words
-            max_len = dec_mask.size(1)  # Lt
-            self_attention_mask = self_attention_mask * torch.tril(
-                self_attention_mask.new_ones(max_len, max_len), diagonal=0)
-
-        # 1, dec self attn + add_norm
-        attention_output = self.self_attention(
-            dec_hidden_states, dec_hidden_states, dec_hidden_states, self_attention_mask)  # (N, Lt, D)
-        attention_output = self.norm1(attention_output + dec_hidden_states)  # (N, Lt, D)
-
-        # 2, dec enc attn + add_norm
-        # Is the attention mask correct?
-        # Yes! Use the mask associated with key/value, not query. (query, key, value)
-        # Additionally, there is no need to do subsequent masking, since each word has the right to see
-        # all the video info.
-        dec_enc_attention_output = self.dec_enc_attention(
-            attention_output, enc_outputs, enc_outputs, enc_mask.unsqueeze(1))  # (N, Lt, D)
-        dec_enc_attention_output = self.norm2(attention_output + dec_enc_attention_output)  # (N, Lt, D)
-
-        # 3, linear + add_norm
-        dec_enc_attention_output = self.output(dec_enc_attention_output, dec_enc_attention_output)  # (N, Lt, D)
-        return dec_enc_attention_output  # (N, Lt, D)
-
-
-class BertDecoderNoMemoryUntied(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.layer = nn.ModuleList([BertDecoderLayerNoMemoryUntied(config)
-                                    for _ in range(config.num_hidden_layers)])
-
-    def forward(self, dec_hidden_states, dec_mask, enc_outputs, enc_mask,
-                _diagonal_mask=True, output_all_encoded_layers=False):
-        """
-        Args:
-            dec_hidden_states: (N, Lt, D)
-            dec_mask: (N, Lt)
-            enc_outputs: (N, Lv, D)
-            enc_mask: (N, Lv)
-            _diagonal_mask: UNUSED! bool, if True mask subsequent words to preserve auto-regressive property
-            output_all_encoded_layers:
-
-        Returns:
-        """
-        all_encoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer):
-            dec_hidden_states = layer_module(
-                dec_hidden_states, dec_mask, enc_outputs, enc_mask, diagonal_mask=True)
-            if output_all_encoded_layers:
-                all_encoder_layers.append(dec_hidden_states)
-        if not output_all_encoded_layers:
-            all_encoder_layers.append(dec_hidden_states)
-        return all_encoder_layers
 
 
 class MemoryInitializer(nn.Module):
@@ -803,6 +563,7 @@ class BertLMPredictionHead(nn.Module):
         """
         (N, L, D)
         """
+        print(hidden_states.shape)
         hidden_states = self.transform(hidden_states)
         hidden_states = self.decoder(hidden_states) + self.bias
         return hidden_states  # (N, L, vocab_size)
@@ -865,8 +626,8 @@ class RecursiveTransformer(nn.Module):
                                             nn.Linear(786, 384),
                                             nn.ReLU(),
                                             nn.Dropout(0.2))
+        # self.future_block = 
         self.future_loss = nn.MSELoss()
-
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
@@ -894,14 +655,6 @@ class RecursiveTransformer(nn.Module):
             prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
         prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
-
-    # ver. LSTM
-    # def forward(self, input_ids_list, video_features_list, input_masks_list,
-    #             token_type_ids_list, input_labels_list, clips_feature, return_memory=False):
-
-    # ver. original
-    # def forward(self, input_ids_list, video_features_list, input_masks_list,
-    #             token_type_ids_list, input_labels_list, return_memory=False):
 
     #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
@@ -934,6 +687,7 @@ class RecursiveTransformer(nn.Module):
             # clip_feature = clips[: , -1, :].view(-1, 1, 384)
             # video_features_list[idx][:, :, 768:1152] = clip_feature
             tmp_clip = self.future_linear(video_features_list[idx])
+            # print(tmp_clip.shape)
             future_loss += self.future_loss(tmp_clip, gt_clip[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
             self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
