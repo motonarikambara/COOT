@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.tensorboard.summary import video
 
 from mart.configs_mart import MartConfig, MartPathConst
 from mart.masked_transformer import MTransformer
@@ -77,6 +78,7 @@ def gelu(x):
         For information: OpenAI GPT"s gelu is slightly different (and gives slightly different results):
         0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
         Also see https://arxiv.org/abs/1606.08415
+    Pytorch公式実装のgeluで良さそう
     """
     return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
@@ -121,7 +123,7 @@ class PositionEncoding(nn.Module):
         return x
 
 
-class BertLayerNorm(nn.Module):
+class LayerNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-12):
         """
         Construct a layernorm module in the TF style (epsilon inside the square root).
@@ -138,7 +140,10 @@ class BertLayerNorm(nn.Module):
         return self.weight * x + self.bias
 
 
-class BertSelfAttention(nn.Module):
+class SelfAttention(nn.Module):
+    """
+    MultiHead Attention層
+    """
     def __init__(self, config):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0:
@@ -201,11 +206,14 @@ class BertSelfAttention(nn.Module):
         return context_layer
 
 
-class BertSelfOutput(nn.Module):
+class SelfOutput(nn.Module):
+    """
+    TransformerにおけるFF層
+    """
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -215,11 +223,14 @@ class BertSelfOutput(nn.Module):
         return hidden_states
 
 
-class BertAttention(nn.Module):
+class Attention(nn.Module):
+    """
+    TransformerにおけるEncoder Layer
+    """
     def __init__(self, config):
         super().__init__()
-        self.self = BertSelfAttention(config)
-        self.output = BertSelfOutput(config)
+        self.self = SelfAttention(config)
+        self.output = SelfOutput(config)
 
     def forward(self, input_tensor, attention_mask):
         """
@@ -234,7 +245,10 @@ class BertAttention(nn.Module):
         return attention_output
 
 
-class BertIntermediate(nn.Module):
+class Intermediate(nn.Module):
+    """
+    geluを用いた1層線形変換
+    """
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -246,11 +260,14 @@ class BertIntermediate(nn.Module):
         return hidden_states
 
 
-class BertOutput(nn.Module):
+class Output(nn.Module):
+    """
+    GeneratorにおけるFF層
+    """
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -260,7 +277,7 @@ class BertOutput(nn.Module):
         return hidden_states
 
 
-def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0):
+def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=False):
     """
     Args:
         input_mask: (N, L) with `1` indicates valid bits, `0` indicates pad
@@ -287,14 +304,17 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0):
     shifted_mask[:, :, :memory_len + max_v_len] = 1
     shifted_mask[:, max_v_len:, memory_len + max_v_len:] =\
         torch.tril(input_mask.new_ones(max_t_len, max_t_len), diagonal=0)
+    if decoder:
+        shifted_mask = torch.ones(shifted_mask.size())
     return shifted_mask
 
 
-def make_pad_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0):
+def make_pad_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=False):
     """
     input_mask: (N, L),
     """
-    shifted_mask = make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=memory_len)
+    shifted_mask =\
+        make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=memory_len, decoder=False)
     # It's correct to use `input_mask.unsqueeze(1)' instead of
     # `torch.bmm(input_mask.unsqueeze(2), input_mask.unsqueeze(1))'
     # since the rest of the bits are still masked in the subsequent processing steps.
@@ -309,17 +329,17 @@ def make_video_only_mask(input_mask, max_v_len):
 
 
 
-class BertLayerWithMemory(nn.Module):
+class LayerWithMemory(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.attention = BertAttention(config)
+        self.attention = Attention(config)
         self.memory_initilizer = MemoryInitializer(config)
         self.memory_updater = MemoryUpdater(config)
-        self.memory_augmented_attention = BertSelfAttention(config)
-        self.hidden_intermediate = BertIntermediate(config)
+        self.memory_augmented_attention = SelfAttention(config)
+        self.hidden_intermediate = Intermediate(config)
         self.memory_projection = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.output = BertOutput(config)
+        self.output = Output(config)
 
     def forward(self, prev_m, hidden_states, attention_mask):
         """
@@ -331,7 +351,7 @@ class BertLayerWithMemory(nn.Module):
         """
         max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
         # self-attention, need to shift right
-        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len * 2, max_t_len * 2)  # (N, L, L)
+        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len, max_t_len)  # (N, L, L)
         attention_output = self.attention(hidden_states, shifted_self_mask)
         intermediate_output = self.hidden_intermediate(attention_output)
 
@@ -359,10 +379,27 @@ class BertLayerWithMemory(nn.Module):
         return updated_m, layer_output
 
 
-class BertEncoderWithMemory(nn.Module):
+class DecoderOutput(nn.Module):
+    """
+    DecoderにおけるFF層
+    """
     def __init__(self, config):
         super().__init__()
-        self.layer = nn.ModuleList([BertLayerWithMemory(config) for _ in range(config.num_hidden_layers)])
+        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        return hidden_states
+
+
+class EncoderWithMemory(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.layer = nn.ModuleList([LayerWithMemory(config) for _ in range(config.num_hidden_layers)])
 
     def forward(self, prev_ms, hidden_states, attention_mask, output_all_encoded_layers=True):
         """
@@ -384,7 +421,55 @@ class BertEncoderWithMemory(nn.Module):
         return prev_ms, all_encoder_layers
 
 
-class BertEmbeddingsWithVideo(nn.Module):
+class DecoderLayer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.attention = Attention(config)
+        self.output = DecoderOutput(config)
+
+    def forward(self, hidden_states, attention_mask):
+        """
+        Args:
+            prev_m: (N, M, D)
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+        Returns:
+        """
+        max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
+        # self-attention, need to shift right
+        shifted_self_mask =\
+            make_pad_shifted_mask(attention_mask, max_v_len, max_t_len, decoder=True)  # (N, L, L)
+        attention_output = self.attention(hidden_states, shifted_self_mask)
+
+        layer_output = self.output(attention_output, attention_output)  # (N, L, D)
+
+        return layer_output
+
+
+class Decoder(nn.Module):
+    def __init__(self, config, num_hidden_layers=3):
+        super().__init__()
+        self.layer = nn.ModuleList([DecoderLayer(config) for _ in range(num_hidden_layers)])
+
+    def forward(self, hidden_states, attention_mask):
+        """
+        Args:
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+            output_all_encoded_layers:
+
+        Returns:
+        """
+        all_decoder_layers = []
+        for layer_idx, layer_module in enumerate(self.layer):
+            hidden_states = layer_module(hidden_states, attention_mask)
+            all_decoder_layers.append(hidden_states)
+        return all_decoder_layers
+
+
+
+class EmbeddingsWithVideo(nn.Module):
     """
     Construct the embeddings from word (+ video), position and token_type embeddings.
     input_ids (batch_size, sequence_length), with [1, sequence_length_1 + 1] filled with [VID]
@@ -401,18 +486,18 @@ class BertEmbeddingsWithVideo(nn.Module):
         self.add_postion_embeddings = add_postion_embeddings
         self.word_embeddings = nn.Embedding(config.vocab_size, config.word_vec_size, padding_idx=0)
         self.word_fc = nn.Sequential(
-            BertLayerNorm(config.word_vec_size, eps=config.layer_norm_eps),
+            LayerNorm(config.word_vec_size, eps=config.layer_norm_eps),
             nn.Dropout(config.hidden_dropout_prob),
             nn.Linear(config.word_vec_size, config.hidden_size),
             nn.ReLU(True),
-            BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps),
+            LayerNorm(config.hidden_size, eps=config.layer_norm_eps),
         )
         self.video_embeddings = nn.Sequential(
-            BertLayerNorm(config.video_feature_size, eps=config.layer_norm_eps),
+            LayerNorm(config.video_feature_size, eps=config.layer_norm_eps),
             nn.Dropout(config.hidden_dropout_prob),
             nn.Linear(config.video_feature_size, config.hidden_size),
             nn.ReLU(True),
-            BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps),
+            LayerNorm(config.hidden_size, eps=config.layer_norm_eps),
         )
 
         if self.add_postion_embeddings:
@@ -422,7 +507,7 @@ class BertEmbeddingsWithVideo(nn.Module):
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def set_pretrained_embedding(self, pretrained_embedding, freeze=True):
@@ -447,8 +532,8 @@ class BertEmbeddingsWithVideo(nn.Module):
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
         words_embeddings += token_type_embeddings
-        # embeddings = words_embeddings + video_embeddings + token_type_embeddings
-        embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
+        embeddings = words_embeddings + video_embeddings + token_type_embeddings
+        # embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
 
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
@@ -467,7 +552,7 @@ class MemoryInitializer(nn.Module):
             torch.randn(1, config.n_memory_cells, 1))  # (1, M, D)
         self.init_memory_fc = nn.Sequential(
             nn.Linear(config.hidden_size, config.hidden_size),
-            BertLayerNorm(config.hidden_size),
+            LayerNorm(config.hidden_size),
             nn.Dropout(config.memory_dropout_prob)
         )
 
@@ -488,7 +573,7 @@ class MemoryInitializer(nn.Module):
 class MemoryUpdater(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.memory_update_attention = BertSelfAttention(config)
+        self.memory_update_attention = SelfAttention(config)
 
         self.mc = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.sc = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
@@ -519,12 +604,12 @@ class MemoryUpdater(nn.Module):
         return updated_memory
 
 
-class BertPredictionHeadTransform(nn.Module):
+class PredictionHeadTransform(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.transform_act_fn = gelu
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, hidden_states):
         """
@@ -536,10 +621,10 @@ class BertPredictionHeadTransform(nn.Module):
         return hidden_states
 
 
-class BertLMPredictionHead(nn.Module):
+class LMPredictionHead(nn.Module):
     def __init__(self, config, bert_model_embedding_weights=None):
         super().__init__()
-        self.transform = BertPredictionHeadTransform(config)
+        self.transform = PredictionHeadTransform(config)
 
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
@@ -563,7 +648,6 @@ class BertLMPredictionHead(nn.Module):
         """
         (N, L, D)
         """
-        print(hidden_states.shape)
         hidden_states = self.transform(hidden_states)
         hidden_states = self.decoder(hidden_states) + self.bias
         return hidden_states  # (N, L, vocab_size)
@@ -611,23 +695,23 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
-        self.embeddings = BertEmbeddingsWithVideo(cfg, add_postion_embeddings=True)
-        self.encoder = BertEncoderWithMemory(cfg)
+        self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
+        self.encoder = EncoderWithMemory(cfg)
         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
             if self.cfg.share_wd_cls_weight else None
-        self.decoder = BertLMPredictionHead(cfg, decoder_classifier_weight)
+        self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
+        self.transformerdecoder = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        # self.lstm = nn.LSTM(input_size=384, hidden_size=384, num_layers=2, batch_first=True)
-        self.future_linear = nn.Sequential(nn.Linear(384, 786),
-                                            nn.ReLU(),
-                                            nn.Linear(786, 384),
-                                            nn.ReLU(),
-                                            nn.Dropout(0.2))
-        # self.future_block = 
-        self.future_loss = nn.MSELoss()
+
+        # self.future_linear = nn.Sequential(nn.Linear(384, 786),
+        #                                     nn.GELU(),
+        #                                     nn.Linear(786, 384),
+        #                                     nn.GELU())
+        # self.future_linear = nn.Linear(384, 384)
+        # self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
@@ -638,7 +722,7 @@ class RecursiveTransformer(nn.Module):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
-        elif isinstance(module, BertLayerNorm):
+        elif isinstance(module, LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
         if isinstance(module, nn.Linear) and module.bias is not None:
@@ -653,7 +737,8 @@ class RecursiveTransformer(nn.Module):
 
         prev_ms, encoded_layer_outputs = self.encoder(
             prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
-        prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
+        decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
+        prediction_scores = self.decoder(decoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
     #ver. future
@@ -681,21 +766,14 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         future_loss = 0
         for idx in range(step_size):
-            # self.lstm.flatten_parameters()
-
-            # clips, _ = self.lstm(clips_feature[idx].view(-1, 15, 384))
-            # clip_feature = clips[: , -1, :].view(-1, 1, 384)
-            # video_features_list[idx][:, :, 768:1152] = clip_feature
-            tmp_clip = self.future_linear(video_features_list[idx])
-            # print(tmp_clip.shape)
-            future_loss += self.future_loss(tmp_clip, gt_clip[idx])
-            prev_ms, encoded_layer_outputs, prediction_scores =\
-            self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
-                                input_masks_list[idx], token_type_ids_list[idx])           
+            # tmp_clip = self.future_linear(video_features_list[idx])
+            # future_loss += self.future_loss(tmp_clip, gt_clip[idx])
             # prev_ms, encoded_layer_outputs, prediction_scores =\
-            #     self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
-            #                       input_masks_list[idx], token_type_ids_list[idx])
-
+            # self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
+            #                     input_masks_list[idx], token_type_ids_list[idx])
+            prev_ms, encoded_layer_outputs, prediction_scores =\
+            self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
+                                input_masks_list[idx], token_type_ids_list[idx])           
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
             prediction_scores_list.append(prediction_scores)
