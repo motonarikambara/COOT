@@ -448,7 +448,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, config, num_hidden_layers=3):
+    def __init__(self, config, num_hidden_layers=5):
         super().__init__()
         self.layer = nn.ModuleList([DecoderLayer(config) for _ in range(num_hidden_layers)])
 
@@ -706,12 +706,6 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
 
-        # self.future_linear = nn.Sequential(nn.Linear(384, 786),
-        #                                     nn.GELU(),
-        #                                     nn.Linear(786, 384),
-        #                                     nn.GELU())
-        # self.future_linear = nn.Linear(384, 384)
-        # self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
@@ -766,11 +760,6 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         future_loss = 0
         for idx in range(step_size):
-            # tmp_clip = self.future_linear(video_features_list[idx])
-            # future_loss += self.future_loss(tmp_clip, gt_clip[idx])
-            # prev_ms, encoded_layer_outputs, prediction_scores =\
-            # self.forward_step(prev_ms, input_ids_list[idx], tmp_clip,
-            #                     input_masks_list[idx], token_type_ids_list[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
             self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
                                 input_masks_list[idx], token_type_ids_list[idx])           
