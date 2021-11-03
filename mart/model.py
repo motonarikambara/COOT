@@ -299,10 +299,11 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=Fa
             [1., 1., 1., 1., 1.]])
     """
     bsz, seq_len = input_mask.shape
-    assert max_v_len + max_t_len + memory_len == seq_len
-    shifted_mask = input_mask.new_zeros(bsz, max_v_len + max_t_len, seq_len)  # (N, L, M+L)
-    shifted_mask[:, :, :memory_len + max_v_len] = 1
-    shifted_mask[:, max_v_len:, memory_len + max_v_len:] =\
+    # assert max_v_len + max_t_len + memory_len == seq_len
+    # max_v_len = 1
+    shifted_mask = input_mask.new_zeros(bsz, max_t_len, seq_len)  # (N, L, M+L)
+    shifted_mask[:, :, :memory_len] = 1
+    shifted_mask[:, :, memory_len:] =\
         torch.tril(input_mask.new_ones(max_t_len, max_t_len), diagonal=0)
     if decoder:
         shifted_mask = torch.ones(shifted_mask.size())
@@ -379,23 +380,6 @@ class LayerWithMemory(nn.Module):
         return updated_m, layer_output
 
 
-class DecoderOutput(nn.Module):
-    """
-    DecoderにおけるFF層
-    """
-    def __init__(self, config):
-        super().__init__()
-        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
-    def forward(self, hidden_states, input_tensor):
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
-
-
 class EncoderWithMemory(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -419,53 +403,6 @@ class EncoderWithMemory(nn.Module):
         if not output_all_encoded_layers:
             all_encoder_layers.append(hidden_states)
         return prev_ms, all_encoder_layers
-
-
-class DecoderLayer(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.attention = Attention(config)
-        self.output = DecoderOutput(config)
-
-    def forward(self, hidden_states, attention_mask):
-        """
-        Args:
-            prev_m: (N, M, D)
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-        Returns:
-        """
-        max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
-        # self-attention, need to shift right
-        shifted_self_mask =\
-            make_pad_shifted_mask(attention_mask, max_v_len, max_t_len, decoder=True)  # (N, L, L)
-        attention_output = self.attention(hidden_states, shifted_self_mask)
-
-        layer_output = self.output(attention_output, attention_output)  # (N, L, D)
-
-        return layer_output
-
-
-class Decoder(nn.Module):
-    def __init__(self, config, num_hidden_layers=5):
-        super().__init__()
-        self.layer = nn.ModuleList([DecoderLayer(config) for _ in range(num_hidden_layers)])
-
-    def forward(self, hidden_states, attention_mask):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-            output_all_encoded_layers:
-
-        Returns:
-        """
-        all_decoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, attention_mask)
-            all_decoder_layers.append(hidden_states)
-        return all_decoder_layers
 
 
 
@@ -503,7 +440,7 @@ class EmbeddingsWithVideo(nn.Module):
         if self.add_postion_embeddings:
             self.position_embeddings = PositionEncoding(n_filters=config.hidden_size,
                                                         max_len=config.max_position_embeddings * 2)
-        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+        # self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -529,10 +466,11 @@ class EmbeddingsWithVideo(nn.Module):
         """
         words_embeddings = self.word_fc(self.word_embeddings(input_ids))
         video_embeddings = self.video_embeddings(video_features)
-        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        embeddings = words_embeddings + video_embeddings
+        # token_type_embeddings = self.token_type_embeddings(token_type_ids)
         # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
-        words_embeddings += token_type_embeddings
-        embeddings = words_embeddings + video_embeddings + token_type_embeddings
+        # words_embeddings += token_type_embeddings
+        # embeddings = words_embeddings + video_embeddings + token_type_embeddings
         # embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
 
         if self.add_postion_embeddings:
@@ -700,7 +638,6 @@ class RecursiveTransformer(nn.Module):
         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
             if self.cfg.share_wd_cls_weight else None
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
-        self.transformerdecoder = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
@@ -731,8 +668,7 @@ class RecursiveTransformer(nn.Module):
 
         prev_ms, encoded_layer_outputs = self.encoder(
             prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
-        decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
-        prediction_scores = self.decoder(decoded_layer_outputs[-1])  # (N, L, vocab_size)
+        prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
     #ver. future
@@ -758,7 +694,6 @@ class RecursiveTransformer(nn.Module):
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        future_loss = 0
         for idx in range(step_size):
             prev_ms, encoded_layer_outputs, prediction_scores =\
             self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
@@ -773,8 +708,7 @@ class RecursiveTransformer(nn.Module):
             # compute loss, get predicted words
             caption_loss = 0.0
             for idx in range(step_size):
-                tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+                caption_loss +=  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
-                caption_loss += 0.1 * tmp_loss
-                caption_loss += future_loss
+                print(caption_loss)
             return caption_loss, prediction_scores_list

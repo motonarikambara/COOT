@@ -3,7 +3,7 @@ config_type: "mart"
 # ---------- Training ----------
 train:
     batch_size: 16
-    num_epochs: 50
+    num_epochs: 25
     loss_func: "crossentropy"
     clip_gradient: 1
 label_smoothing: 0.1
@@ -47,7 +47,7 @@ dataset_val:
 max_n_sen: 12 # 6 activitynet, 12 youcook2
 max_n_sen_add_val: 10
 max_t_len: 22
-max_v_len: 3 # 3 for mart with coot, 100 for rgb+flow video features
+max_v_len: 0 # 3 for mart with coot, 100 for rgb+flow video features
 type_vocab_size: 2
 word_vec_size: 300
 # COOT embeddings. Set coot_model_name to null to train on video features
