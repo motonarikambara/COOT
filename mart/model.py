@@ -736,14 +736,14 @@ class RecursiveTransformer(nn.Module):
         return prev_ms, encoded_layer_outputs, prediction_scores
 
     # ver. future
-    def forward(self, input_ids_list, video_features_list, input_masks_list,
-                token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
+    def forward(self, input_ids_list, vid_feat_list, input_masks_list,
+                tok_type_ids_list, input_labels_list, gt_clip, return_memory=False):
         """
         Args:
             input_ids_list: [(N, L)] * step_size
-            video_features_list: [(N, L, D_v)] * step_size
+            vid_feat_list: [(N, L, D_v)] * step_size
             input_masks_list: [(N, L)] * step_size with 1 indicates valid bits
-            token_type_ids_list: [(N, L)] * step_size, with `0` on the first `max_v_len` bits,
+            tok_type_ids_list: [(N, L)] * step_size, with `0` on the first `max_v_len` bits,
                 `1` on the last `max_t_len`
             input_labels_list: [(N, L)] * step_size, with `-1` on ignored positions,
                 will not be used when return_memory is True, thus can be None in this case
@@ -751,21 +751,22 @@ class RecursiveTransformer(nn.Module):
 
         Returns:
         """
-        # _, video_feature = self.lstm(video_features_list)
+        # _, video_feature = self.lstm(vid_feat_list)
         # [(N, M, D)] * num_hidden_layers, initialized internally
         prev_ms = [None] * self.cfg.num_hidden_layers
         step_size = len(input_ids_list)
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
-        prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
+        pred_sco_list = []  # [(N, L, vocab_size)] * step_size
         for idx in range(step_size):
-            # att_feat = self.transformerencoder(video_features_list[idx])
+            vid_feat_list[idx][1] = gt_clip[idx][1]
+            # att_feat = self.transformerencoder(vid_feat_list[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
-            self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
-                                input_masks_list[idx], token_type_ids_list[idx])           
+            self.forward_step(prev_ms, input_ids_list[idx], vid_feat_list[idx],
+                                input_masks_list[idx], tok_type_ids_list[idx])
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
-            prediction_scores_list.append(prediction_scores)
+            pred_sco_list.append(prediction_scores)
 
         if return_memory:  # used to analyze memory
             return memory_list
@@ -773,7 +774,8 @@ class RecursiveTransformer(nn.Module):
             # compute loss, get predicted words
             caption_loss = 0.0
             for idx in range(step_size):
-                tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+                tmp_loss = \
+                    self.loss_func(pred_sco_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
                 caption_loss += tmp_loss
-            return caption_loss, prediction_scores_list
+            return caption_loss, pred_sco_list

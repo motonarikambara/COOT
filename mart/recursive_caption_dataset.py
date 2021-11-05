@@ -419,7 +419,7 @@ class RecursiveCaptionDataset(data.Dataset):
         feat[valid_l] = clip_feat
 
         future = np.zeros((max_v_l, self.coot_dim_clip))
-        future[valid_l] = future_feat            
+        future[valid_l] = future_feat
         valid_l += 1
         # print("CLIP")
 
@@ -428,7 +428,6 @@ class RecursiveCaptionDataset(data.Dataset):
         # future
         return feat, valid_l, future
 
-    # def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx):
     # future
     def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx, future_feats):
         """
@@ -449,12 +448,15 @@ class RecursiveCaptionDataset(data.Dataset):
         mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
         # 上記のように特徴量を配置
         # feat∈25×1152
-        feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
+        # includes [CLS], [SEP]
+        feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))
         # feat[1:len(raw_feat) + 1] = raw_feat
         feat[1:4] = raw_feat
         # future
-        future_feat = np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))  # includes [CLS], [SEP]
-        future_feat[1:len(future) + 1] = future            
+        # includes [CLS], [SEP]
+        future_feat =\
+            np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))
+        future_feat[1:4] = future
         # feat = raw_feat
         # return feat, video_tokens, mask
         # future
@@ -535,19 +537,22 @@ class RecursiveCaptionDataset(data.Dataset):
             padded_batch = []
             padding_clip_sen_data = copy.deepcopy(
                 batch[0][0])  # doesn"t matter which one is used
-            padding_clip_sen_data["input_labels"][:] = RecursiveCaptionDataset.IGNORE
+            padding_clip_sen_data["input_labels"][:] = \
+                RecursiveCaptionDataset.IGNORE
             for ele in batch:
                 cur_n_sen = len(ele)
                 if cur_n_sen < max_n_sen:
                     # noinspection PyAugmentAssignment
-                    ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
+                    ele =\
+                        ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
                 raw_step_sizes.append(cur_n_sen)
                 padded_batch.append(ele)
 
             # Step2: batching each steps individually in the batches
             collated_step_batch = []
             for step_idx in range(max_n_sen):
-                collated_step = step_collate([e[step_idx] for e in padded_batch])
+                collated_step =\
+                    step_collate([e[step_idx] for e in padded_batch])
                 collated_step_batch.append(collated_step)
             return collated_step_batch, raw_step_sizes, batch_meta
 
