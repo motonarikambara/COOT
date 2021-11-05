@@ -1,19 +1,6 @@
 """
 Captioning dataset.
 
-References:
-    Copyright (c) 2017 Jie Lei
-    Licensed under The MIT License, see https://choosealicense.com/licenses/mit/
-    @inproceedings{lei2020mart,
-        title={MART: Memory-Augmented Recurrent Transformer for Coherent Video Paragraph Captioning},
-        author={Lei, Jie and Wang, Liwei and Shen, Yelong and Yu, Dong and Berg, Tamara L and Bansal, Mohit},
-        booktitle={ACL},
-        year={2020}
-    }
-
-    History:
-    https://github.com/jayleicn/recurrent-transformer
-    Current version 2021 https://github.com/gingsi/coot-videotext
 """
 import copy
 import json
@@ -33,12 +20,12 @@ import sys
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
-from nntrainer.utils_torch import create_shared_array
 
 
 class DataTypesConstCaption(ConstantHolder):
     """
-    Possible video data types for the dataset: Video features or COOT embeddings.
+    Possible video data types for the dataset:
+    Video features or COOT embeddings.
     """
     VIDEO_FEAT = "video_feat"
     COOT_EMB = "coot_emb"
@@ -65,11 +52,13 @@ class RecursiveCaptionDataset(data.Dataset):
     recurrent: if True, return recurrent data
     """
 
-    def __init__(self, dset_name: str, max_t_len, max_v_len, max_n_sen, mode="train",
-                 recurrent=True, untied=False,
+    def __init__(self, dset_name: str, max_t_len, max_v_len, max_n_sen,
+                 mode="train", recurrent=True, untied=False,
                  video_feature_dir: Optional[str] = None,
-                 coot_model_name=None, coot_mode="all", coot_dim_vid=768, coot_dim_clip=384,
-                 annotations_dir: str = "annotations", coot_feat_dir="provided_embeddings",
+                 coot_model_name=None, coot_mode="all",
+                 coot_dim_vid=768, coot_dim_clip=384,
+                 annotations_dir: str = "annotations",
+                 coot_feat_dir="provided_embeddings",
                  dataset_max: Optional[int] = None, preload: bool = False):
         # metadata settings
         self.dset_name = dset_name
@@ -77,16 +66,20 @@ class RecursiveCaptionDataset(data.Dataset):
 
         # COOT feature settings
         self.coot_model_name = coot_model_name
-        self.coot_mode = coot_mode  # "all" for vid and clip repr, "clip" for only clip repr
+        self.coot_mode = coot_mode  # "clip" for only clip repr
         self.coot_dim_vid = coot_dim_vid
         self.coot_dim_clip = coot_dim_clip
         self.coot_feat_dir = Path(coot_feat_dir)
 
         # Video feature settings
+        duration_file = "captioning_video_feat_duration.csv"
         self.video_feature_dir = Path(video_feature_dir) / self.dset_name
-        self.duration_file = self.annotations_dir / self.dset_name / "captioning_video_feat_duration.csv"
-        self.word2idx_file = self.annotations_dir / self.dset_name / "mart_word2idx.json"
-        self.word2idx = json.load(self.word2idx_file.open("rt", encoding="utf8"))
+        self.duration_file =\
+            self.annotations_dir / self.dset_name / duration_file
+        self.word2idx_file =\
+            self.annotations_dir / self.dset_name / "mart_word2idx.json"
+        self.word2idx =\
+            json.load(self.word2idx_file.open("rt", encoding="utf8"))
         self.idx2word = {int(v): k for k, v in list(self.word2idx.items())}
         print(f"WORD2IDX: {self.word2idx_file} len {len(self.word2idx)}")
 
@@ -103,7 +96,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # Recurrent or untied, different data styles for different models
         self.recurrent = recurrent
         self.untied = untied
-        assert not (self.recurrent and self.untied), "untied and recurrent cannot be True for both"
+        assert not (self.recurrent and self.untied),\
+            "untied and recurrent cannot be True for both"
 
         # ---------- Load metadata ----------
 
@@ -609,9 +603,12 @@ def create_mart_datasets_and_loaders(
         dset_name_train, cfg.max_t_len, cfg.max_v_len, cfg.max_n_sen,
         mode="train", recurrent=cfg.recurrent, untied=cfg.untied or cfg.mtrans,
         video_feature_dir=video_feature_dir,
-        coot_model_name=cfg.coot_model_name, coot_mode=cfg.coot_mode, coot_dim_vid=cfg.coot_dim_vid,
-        coot_dim_clip=cfg.coot_dim_clip, annotations_dir=annotations_dir, coot_feat_dir=coot_feat_dir,
-        dataset_max=cfg.dataset_train.max_datapoints, preload=cfg.dataset_train.preload)
+        coot_model_name=cfg.coot_model_name,
+        coot_mode=cfg.coot_mode, coot_dim_vid=cfg.coot_dim_vid,
+        coot_dim_clip=cfg.coot_dim_clip, annotations_dir=annotations_dir,
+        coot_feat_dir=coot_feat_dir, 
+        dataset_max=cfg.dataset_train.max_datapoints,
+        preload=cfg.dataset_train.preload)
     # add 10 at max_n_sen to make the inference stage use all the segments
     # max_n_sen_val = cfg.max_n_sen + 10
     max_n_sen_val = cfg.max_n_sen
@@ -619,16 +616,23 @@ def create_mart_datasets_and_loaders(
         cfg.dataset_val.name, cfg.max_t_len, cfg.max_v_len, max_n_sen_val,
         mode="val", recurrent=cfg.recurrent, untied=cfg.untied or cfg.mtrans,
         video_feature_dir=video_feature_dir,
-        coot_model_name=cfg.coot_model_name, coot_mode=cfg.coot_mode, coot_dim_vid=cfg.coot_dim_vid,
-        coot_dim_clip=cfg.coot_dim_clip, annotations_dir=annotations_dir, coot_feat_dir=coot_feat_dir,
-        dataset_max=cfg.dataset_val.max_datapoints, preload=cfg.dataset_val.preload)
+        coot_model_name=cfg.coot_model_name,
+        coot_mode=cfg.coot_mode, coot_dim_vid=cfg.coot_dim_vid,
+        coot_dim_clip=cfg.coot_dim_clip,
+        annotations_dir=annotations_dir, coot_feat_dir=coot_feat_dir,
+        dataset_max=cfg.dataset_val.max_datapoints,
+        preload=cfg.dataset_val.preload)
 
     train_loader = data.DataLoader(
-        train_dataset, collate_fn=train_dataset.collate_fn, batch_size=cfg.train.batch_size,
-        shuffle=cfg.dataset_train.shuffle, num_workers=cfg.dataset_train.num_workers,
+        train_dataset, collate_fn=train_dataset.collate_fn,
+        batch_size=cfg.train.batch_size,
+        shuffle=cfg.dataset_train.shuffle,
+        num_workers=cfg.dataset_train.num_workers,
         pin_memory=cfg.dataset_train.pin_memory)
     val_loader = data.DataLoader(
-        val_dataset, collate_fn=val_dataset.collate_fn, batch_size=cfg.val.batch_size, shuffle=cfg.dataset_val.shuffle,
-        num_workers=cfg.dataset_val.num_workers, pin_memory=cfg.dataset_val.pin_memory)
+        val_dataset, collate_fn=val_dataset.collate_fn,
+        batch_size=cfg.val.batch_size, shuffle=cfg.dataset_val.shuffle,
+        num_workers=cfg.dataset_val.num_workers,
+        pin_memory=cfg.dataset_val.pin_memory)
 
     return train_dataset, val_dataset, train_loader, val_loader
