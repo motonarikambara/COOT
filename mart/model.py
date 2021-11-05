@@ -764,7 +764,6 @@ class RecursiveTransformer(nn.Module):
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        future_loss = 0
         for idx in range(step_size):
             prev_ms, encoded_layer_outputs, prediction_scores =\
             self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
@@ -779,8 +778,6 @@ class RecursiveTransformer(nn.Module):
             # compute loss, get predicted words
             caption_loss = 0.0
             for idx in range(step_size):
-                tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+                caption_loss +=  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
-                caption_loss += 0.1 * tmp_loss
-                caption_loss += future_loss
             return caption_loss, prediction_scores_list
