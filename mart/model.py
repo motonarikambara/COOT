@@ -655,8 +655,7 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.apply(self.init_bert_weights)
-        self.dec_cnn = nn.Conv1D(25, 1, 1)
-
+        self.dec_cnn = nn.Conv1d(25, 1, 1)
 
     def init_bert_weights(self, module):
         """
@@ -681,9 +680,8 @@ class RecursiveTransformer(nn.Module):
 
         prev_ms, encoded_layer_outputs = self.encoder(
             prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
-        decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
-        print(decoded_layer_outputs[-1].shape)
-        decoded_layer_outputs = self.dec_cnn(decoded_layer_outputs)
+        # decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
+        decoded_layer_outputs = self.dec_cnn(encoded_layer_outputs[-1])
         prediction_scores = self.decoder(decoded_layer_outputs)  # (N, L, vocab_size)
         # prediction_scores = self.decoder(decoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
