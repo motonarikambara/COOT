@@ -737,19 +737,23 @@ class RecursiveTransformer(nn.Module):
 
     # ver. future
     def forward(self, input_ids_list, vid_feat_list, input_masks_list,
-                tok_type_ids_list, input_labels_list, gt_clip, return_memory=False):
+                tok_type_ids_list, input_labels_list, gt_clip,
+                return_memory=False):
         """
         Args:
             input_ids_list: [(N, L)] * step_size
             vid_feat_list: [(N, L, D_v)] * step_size
             input_masks_list: [(N, L)] * step_size with 1 indicates valid bits
-            tok_type_ids_list: [(N, L)] * step_size, with `0` on the first `max_v_len` bits,
+            tok_type_ids_list: [(N, L)] * step_size,
+                with `0` on the first `max_v_len` bits,
                 `1` on the last `max_t_len`
-            input_labels_list: [(N, L)] * step_size, with `-1` on ignored positions,
-                will not be used when return_memory is True, thus can be None in this case
+            input_labels_list: [(N, L)] * step_size,
+                with `-1` on ignored positions,
+                will not be used when return_memory is True,
+                thus can be None in this case
             return_memory: bool,
-
         Returns:
+            caption_loss, pred_sco_list
         """
         # _, video_feature = self.lstm(vid_feat_list)
         # [(N, M, D)] * num_hidden_layers, initialized internally

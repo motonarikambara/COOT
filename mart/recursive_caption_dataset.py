@@ -391,7 +391,7 @@ class RecursiveCaptionDataset(data.Dataset):
             video_feature=feat.astype(np.float32),
             future_clips=future_clip.astype(np.float32))
         meta = dict(
-            name=name, timestamp=timestamp, sentence=sentence, )
+            name=name, timestamp=timestamp, sentence=sentence)
         return coll_data, meta
 
     @classmethod
@@ -409,7 +409,7 @@ class RecursiveCaptionDataset(data.Dataset):
 
     # future
     def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l, future_feats):
-    # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
+        # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
         clip_feats = video_feat_tuple
         clip_feat = clip_feats[clip_idx]
         future_feat = future_feats[clip_idx]
