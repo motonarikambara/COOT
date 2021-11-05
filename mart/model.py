@@ -735,7 +735,7 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(encoded_layer_outputs[-1])  # (N, L, vocab_size)
         return prev_ms, encoded_layer_outputs, prediction_scores
 
-    #ver. future
+    # ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
                 token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
         """

@@ -194,9 +194,9 @@ class RecursiveCaptionDataset(data.Dataset):
                 self.coot_vid_id_to_vid_number[vid_id] = i
 
             # map video id and clip id to clip number
-            self.coot_vid_clip_id_to_clip_number = {}
+            self.coot_idx_to_clip_number = {}
             for i, (vid_id, clip_id) in enumerate(clip_ids):
-                self.coot_vid_clip_id_to_clip_number[f"{vid_id}/{clip_id}"] = i
+                self.coot_idx_to_clip_number[f"{vid_id}/{clip_id}"] = i
 
             self.frame_to_second = None  # Don't need this for COOT embeddings
 
@@ -269,21 +269,24 @@ class RecursiveCaptionDataset(data.Dataset):
                 'vid_emb', 'clip_emb', 'vid_context', 'par_emb', 'sent_emb', 'par_context']
 
         # 動画に関する特徴量を取得
-        vid_feat = np.array(h5[f_vid_emb][vid_num])
-        vidctx_feat = np.array(h5[f_vid_context][vid_num])
         num_clips = self.coot_clip_nums[vid_num]
         clip_feats = []
         future_clip = []
         clip_vid = np.zeros((15, 1, 384))
         future_vid = np.zeros((15, 1, 384))
         for clip in range(num_clips-1):
-            future_num = clip + 1
-            clip_num = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{clip}"]
-            future = self.coot_vid_clip_id_to_clip_number[f"{fixed_name}/{future_num}"]
+            clip_num =\
+                self.coot_idx_to_clip_number[f"{fixed_name}/{clip}"]
+            fut_num = clip - 1
             clip_feat = np.array(h5[f_clip_emb][clip_num])
+            if fut_num >= 0:
+                future =\
+                    self.coot_idx_to_clip_number[f"{fixed_name}/{fut_num}"]
+            else:
+                future = clip_num
             future_feat = np.array(h5[f_clip_emb][future])
             clip_vid[clip, 0, :] = clip_feat
-            # future_vid[clip, 0, :] = future_feat
+            future_vid[clip, 0, :] = future_feat
             clip_feats.append(clip_feat)
             future_clip.append(future_feat)
         clip_feat = np.array(h5[f_clip_emb][0])
@@ -315,7 +318,7 @@ class RecursiveCaptionDataset(data.Dataset):
         else:
             # ver. future
             clip_feats, future_feats = self._load_coot_video_feature(raw_name)
-            video_feature = clip_feats          
+            video_feature = clip_feats
 
         # print("loaded features", name, video_name, video_feature.shape)
         # print(video_feature)
@@ -327,17 +330,14 @@ class RecursiveCaptionDataset(data.Dataset):
             single_video_features = []
             single_video_meta = []
             for clip_idx in range(num_sen):
+                # cur_data:video特徴量を含むdict
                 cur_data, cur_meta = self.clip_sentence_to_feature(
-                    example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature, future_feats,
-                    clip_idx)
+                    example["name"], example["timestamps"][clip_idx],
+                    example["sentences"][clip_idx], video_feature,
+                    future_feats, clip_idx)
+                # single_video_features: video特徴量を含むdict
                 single_video_features.append(cur_data)
                 single_video_meta.append(cur_meta)
-            # cur_data:video特徴量を含むdict
-            # cur_data, cur_meta = self.clip_sentence_to_feature(
-            #     example["name"], example["timestamps"], example["sentences"], video_feature, clip_vid)
-            # single_video_features.append(cur_data)
-            # single_video_meta.append(cur_meta)
-            # single_video_features: video特徴量を含むdict
             return single_video_features, single_video_meta
         else:
             print("recursive_caption_dataset.py")
