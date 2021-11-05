@@ -450,7 +450,8 @@ class RecursiveCaptionDataset(data.Dataset):
             # 上記のように特徴量を配置
             # feat∈25×1152
             feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))  # includes [CLS], [SEP]
-            feat[1:len(raw_feat) + 1] = raw_feat
+            # feat[1:len(raw_feat) + 1] = raw_feat
+            feat[1:4] = raw_feat
             # future
             future_feat = np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))  # includes [CLS], [SEP]
             future_feat[1:len(future) + 1] = future            

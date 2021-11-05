@@ -177,7 +177,7 @@ class SelfAttention(nn.Module):
         """
         # only need to mask the dimension where the softmax (last dim) is applied, as another dim (second last)
         # will be ignored in future computation anyway
-        if attention_mask:
+        if attention_mask != None:
             attention_mask = (1 - attention_mask.unsqueeze(1)) * -10000.  # (N, 1, Lq, L)
         mixed_query_layer = self.query(query_states)
         mixed_key_layer = self.key(key_states)
@@ -191,7 +191,7 @@ class SelfAttention(nn.Module):
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # (N, nh, Lq, L)
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-        if attention_mask:
+        if attention_mask != None:
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -423,49 +423,49 @@ class EncoderWithMemory(nn.Module):
         return prev_ms, all_encoder_layers
 
 
-class EncoderLayer(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.attention = Attention(config)
-        self.output = DecoderOutput(config)
+# class EncoderLayer(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.config = config
+#         self.attention = Attention(config)
+#         self.output = DecoderOutput(config)
 
-    def forward(self, hidden_states):
-        """
-        Args:
-            prev_m: (N, M, D)
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-        Returns:
-        """
-        max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
-        # self-attention, need to shift right
-        attention_output = self.attention(hidden_states)
+#     def forward(self, hidden_states):
+#         """
+#         Args:
+#             prev_m: (N, M, D)
+#             hidden_states: (N, L, D)
+#             attention_mask: (N, L)
+#         Returns:
+#         """
+#         max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
+#         # self-attention, need to shift right
+#         attention_output = self.attention(hidden_states)
 
-        layer_output = self.output(attention_output, attention_output)  # (N, L, D)
+#         layer_output = self.output(attention_output, attention_output)  # (N, L, D)
 
-        return layer_output
+#         return layer_output
 
 
-class Encoder(nn.Module):
-    def __init__(self, config, num_hidden_layers=5):
-        super().__init__()
-        self.layer = nn.ModuleList([EncoderLayer(config) for _ in range(num_hidden_layers)])
+# class Encoder(nn.Module):
+#     def __init__(self, config, num_hidden_layers=5):
+#         super().__init__()
+#         self.layer = nn.ModuleList([EncoderLayer(config) for _ in range(num_hidden_layers)])
 
-    def forward(self, hidden_states):
-        """
-        Args:
-            hidden_states: (N, L, D)
-            attention_mask: (N, L)
-            output_all_encoded_layers:
+#     def forward(self, hidden_states):
+#         """
+#         Args:
+#             hidden_states: (N, L, D)
+#             attention_mask: (N, L)
+#             output_all_encoded_layers:
 
-        Returns:
-        """
-        all_decoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states)
-            all_decoder_layers.append(hidden_states)
-        return all_decoder_layers
+#         Returns:
+#         """
+#         all_decoder_layers = []
+#         for layer_idx, layer_module in enumerate(self.layer):
+#             hidden_states = layer_module(hidden_states)
+#             all_decoder_layers.append(hidden_states)
+#         return all_decoder_layers
 
 
 
@@ -700,7 +700,7 @@ class RecursiveTransformer(nn.Module):
         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
             if self.cfg.share_wd_cls_weight else None
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
-        self.transformerencoder = Encoder(cfg)
+        # self.transformerencoder = Encoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
@@ -758,11 +758,10 @@ class RecursiveTransformer(nn.Module):
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        future_loss = 0
         for idx in range(step_size):
-            att_feat = self.transformerencoder(video_features_list[idx])
+            # att_feat = self.transformerencoder(video_features_list[idx])
             prev_ms, encoded_layer_outputs, prediction_scores =\
-            self.forward_step(prev_ms, input_ids_list[idx], att_feat,
+            self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
                                 input_masks_list[idx], token_type_ids_list[idx])           
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
@@ -776,6 +775,5 @@ class RecursiveTransformer(nn.Module):
             for idx in range(step_size):
                 tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
-                caption_loss += 0.1 * tmp_loss
-                caption_loss += future_loss
+                caption_loss += tmp_loss
             return caption_loss, prediction_scores_list
