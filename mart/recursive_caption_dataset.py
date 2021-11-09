@@ -38,7 +38,8 @@ from nntrainer.utils_torch import create_shared_array
 
 class DataTypesConstCaption(ConstantHolder):
     """
-    Possible video data types for the dataset: Video features or COOT embeddings.
+    Possible video data types for the dataset:
+    Video features or COOT embeddings.
     """
     VIDEO_FEAT = "video_feat"
     COOT_EMB = "coot_emb"
@@ -65,12 +66,17 @@ class RecursiveCaptionDataset(data.Dataset):
     recurrent: if True, return recurrent data
     """
 
-    def __init__(self, dset_name: str, max_t_len, max_v_len, max_n_sen, mode="train",
-                 recurrent=True, untied=False,
-                 video_feature_dir: Optional[str] = None,
-                 coot_model_name=None, coot_mode="all", coot_dim_vid=768, coot_dim_clip=384,
-                 annotations_dir: str = "annotations", coot_feat_dir="provided_embeddings",
-                 dataset_max: Optional[int] = None, preload: bool = False):
+    def __init__(
+                self, dset_name: str, 
+                max_t_len, max_v_len, max_n_sen, mode="train",
+                recurrent=True, untied=False,
+                video_feature_dir: Optional[str] = None,
+                coot_model_name=None, coot_mode="all",
+                coot_dim_vid=768, coot_dim_clip=384,
+                annotations_dir: str = "annotations",
+                coot_feat_dir="provided_embeddings",
+                dataset_max: Optional[int] = None, preload: bool = False
+                ):
         # metadata settings
         self.dset_name = dset_name
         self.annotations_dir = Path(annotations_dir)
@@ -454,7 +460,8 @@ class RecursiveCaptionDataset(data.Dataset):
             feat[1:4] = raw_feat
             # future
             future_feat = np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))  # includes [CLS], [SEP]
-            future_feat[1:len(future) + 1] = future            
+            # future_feat[1:len(future) + 1] = future
+            future_feat[1:4] = future
             # feat = raw_feat
             # return feat, video_tokens, mask
             # future
@@ -508,7 +515,8 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         if self.recurrent:
             # recurrent collate function. original docstring:
-            # HOW to batch clip-sentence pair? 1) directly copy the last sentence, but do not count them in when
+            # HOW to batch clip-sentence pair?
+            # 1) directly copy the last sentence, but do not count them in when
             # back-prop OR put all -1 to their text token label, treat
 
             # collect meta
@@ -534,19 +542,22 @@ class RecursiveCaptionDataset(data.Dataset):
             padded_batch = []
             padding_clip_sen_data = copy.deepcopy(
                 batch[0][0])  # doesn"t matter which one is used
-            padding_clip_sen_data["input_labels"][:] = RecursiveCaptionDataset.IGNORE
+            padding_clip_sen_data["input_labels"][:] =\
+                RecursiveCaptionDataset.IGNORE
             for ele in batch:
                 cur_n_sen = len(ele)
                 if cur_n_sen < max_n_sen:
                     # noinspection PyAugmentAssignment
-                    ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
+                    ele =\
+                        ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
                 raw_step_sizes.append(cur_n_sen)
                 padded_batch.append(ele)
 
             # Step2: batching each steps individually in the batches
             collated_step_batch = []
             for step_idx in range(max_n_sen):
-                collated_step = step_collate([e[step_idx] for e in padded_batch])
+                collated_step =\
+                    step_collate([e[step_idx] for e in padded_batch])
                 collated_step_batch.append(collated_step)
             return collated_step_batch, raw_step_sizes, batch_meta
 
