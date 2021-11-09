@@ -896,6 +896,7 @@ class RecursiveTransformer(nn.Module):
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         for idx in range(step_size):
+            video_features_list[idx][:, 2, :] = gt_clip[idx][:, 2, :]
             encoded_layer_outputs, prediction_scores =\
             self.forward_step(input_ids_list[idx], video_features_list[idx],
                                 input_masks_list[idx], token_type_ids_list[idx])           
