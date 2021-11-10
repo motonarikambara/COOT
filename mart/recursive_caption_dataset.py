@@ -266,31 +266,31 @@ class RecursiveCaptionDataset(data.Dataset):
         # 動画に関する特徴量を取得
         num_clips = self.coot_clip_nums[vid_num]
         clip_feats = []
-        future_clip = []
-        clip_vid = np.zeros((15, 1, 384))
-        future_vid = np.zeros((15, 1, 384))
+        future_feats = []
+        past_feats = []
         for clip in range(num_clips-1):
-            clip_num =\
+            clip_idx =\
                 self.coot_idx_to_clip_number[f"{fixed_name}/{clip}"]
-            fut_num = clip - 1
-            clip_feat = np.array(h5[f_clip_emb][clip_num])
-            if fut_num >= 0:
-                future =\
-                    self.coot_idx_to_clip_number[f"{fixed_name}/{fut_num}"]
+            past_num = clip - 1
+            future_num = clip + 1
+            clip_feat = np.array(h5[f_clip_emb][clip_idx])
+            future_idx =\
+                self.coot_idx_to_clip_number[f"{fixed_name}/{future_num}"]
+            future_feat = np.array(h5[f_clip_emb][future_idx])
+            if past_num >= 0:
+                past_idx =\
+                    self.coot_idx_to_clip_number[f"{fixed_name}/{past_num}"]
             else:
-                future = clip_num
-            future_feat = np.array(h5[f_clip_emb][future])
-            clip_vid[clip, 0, :] = clip_feat
-            future_vid[clip, 0, :] = future_feat
+                past_idx = clip_idx
+            past_feat = np.array(h5[f_clip_emb][past_idx])
             clip_feats.append(clip_feat)
-            future_clip.append(future_feat)
-        clip_feat = np.array(h5[f_clip_emb][0])
-        # if 全てのクリップ
-        # clip_feats.append(clip_feat)
+            past_feats.append(past_feat)
+            future_feats.append(future_feat)
         clip_feats = np.stack(clip_feats, axis=0)
-        future_clip = np.stack(future_clip, axis=0)
+        past_feats = np.stack(past_feats, axis=0)
+        future_feats = np.stack(future_feats, axis=0)
         # ver. future
-        return clip_feats, future_clip
+        return clip_feats, past_feats, future_feats
 
     def convert_example_to_features(self, example):
         """
@@ -312,38 +312,30 @@ class RecursiveCaptionDataset(data.Dataset):
             video_feature = self._load_mart_video_feature(raw_name)
         else:
             # ver. future
-            clip_feats, future_feats = self._load_coot_video_feature(raw_name)
+            clip_feats, past_feats, future_feats =\
+                self._load_coot_video_feature(raw_name)
             video_feature = clip_feats
 
-        # print("loaded features", name, video_name, video_feature.shape)
-        # print(video_feature)
-        # sys.exit()
+        # recurrent
+        num_sen = len(example["sentences"])
+        single_video_features = []
+        single_video_meta = []
+        for clip_idx in range(num_sen):
+            # cur_data:video特徴量を含むdict
+            cur_data, cur_meta = self.clip_sentence_to_feature(
+                example["name"], example["timestamps"][clip_idx],
+                example["sentences"][clip_idx], video_feature,
+                past_feats, future_feats, clip_idx)
+            # single_video_features: video特徴量を含むdict
+            single_video_features.append(cur_data)
+            single_video_meta.append(cur_meta)
+        return single_video_features, single_video_meta
 
-        if self.recurrent:
-            # recurrent
-            num_sen = len(example["sentences"])
-            single_video_features = []
-            single_video_meta = []
-            for clip_idx in range(num_sen):
-                # cur_data:video特徴量を含むdict
-                cur_data, cur_meta = self.clip_sentence_to_feature(
-                    example["name"], example["timestamps"][clip_idx],
-                    example["sentences"][clip_idx], video_feature,
-                    future_feats, clip_idx)
-                # single_video_features: video特徴量を含むdict
-                single_video_features.append(cur_data)
-                single_video_meta.append(cur_meta)
-            return single_video_features, single_video_meta
-        else:
-            print("recursive_caption_dataset.py")
-            sys.exit()
-
-    # ver. original
-    # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_idx: int):
     # ver. future
-    def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, future_clip, clip_idx: int):
-    # ver. lstm
-    # def clip_sentence_to_feature(self, name, timestamp, sentence, video_feature, clip_vid):
+    def clip_sentence_to_feature(
+        self, name, timestamp, sentence, video_feature,
+        past_feats, future_feats, clip_idx: int
+    ):
         """
         make features for a single clip-sentence pair.
         [CLS], [VID], ..., [VID], [SEP], [BOS], [WORD], ..., [WORD], [EOS]
@@ -361,9 +353,9 @@ class RecursiveCaptionDataset(data.Dataset):
                 self.dset_name == "activitynet" else self.frame_to_second[name]
 
         # future
-        feat, video_tokens, video_mask, future_clip =\
+        feat, video_tokens, video_mask, future_clips =\
             self._load_indexed_video_feature(
-                video_feature, timestamp, frm2sec, clip_idx, future_clip)
+                video_feature, timestamp, frm2sec, clip_idx, past_feats, future_feats)
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
 
         input_tokens = video_tokens + text_tokens
@@ -384,7 +376,7 @@ class RecursiveCaptionDataset(data.Dataset):
             input_mask=np.array(input_mask).astype(np.float32),
             token_type_ids=np.array(token_type_ids).astype(np.int64),
             video_feature=feat.astype(np.float32),
-            future_clips=future_clip.astype(np.float32))
+            future_clips=future_clips.astype(np.float32))
         meta = dict(
             name=name, timestamp=timestamp, sentence=sentence)
         return coll_data, meta
@@ -403,28 +395,39 @@ class RecursiveCaptionDataset(data.Dataset):
         return st, ed
 
     # future
-    def _get_vt_features(self, video_feat_tuple, clip_idx, max_v_l, future_feats):
+    def _get_vt_features(
+        self, video_feat_tuple, clip_idx, max_v_l, past_feats, future_feats
+    ):
         # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
         clip_feats = video_feat_tuple
         clip_feat = clip_feats[clip_idx]
         future_feat = future_feats[clip_idx]
+        past_feat = past_feats[clip_idx]
         # only clip (1, 384)
         valid_l = 0
         feat = np.zeros((max_v_l, self.coot_dim_clip))
         feat[valid_l] = clip_feat
 
+        past = np.zeros((max_v_l, self.coot_dim_clip))
+        past[valid_l] = past_feat
+
         future = np.zeros((max_v_l, self.coot_dim_clip))
         future[valid_l] = future_feat
+
+        # future = np.zeros((max_v_l, self.coot_dim_clip))
+        # future[valid_l] = future_feat
         valid_l += 1
         # print("CLIP")
 
         assert valid_l == max_v_l, f"valid {valid_l} max {max_v_l}"
         # return feat, valid_l
         # future
-        return feat, valid_l, future
+        return feat, valid_l, past, future
 
     # future
-    def _load_indexed_video_feature(self, raw_feat, timestamp, frm2sec, clip_idx, future_feats):
+    def _load_indexed_video_feature(
+        self, raw_feat, timestamp, frm2sec, clip_idx, past_feats, future_feats
+    ):
         """
         [CLS], [VID], ..., [VID], [SEP], [PAD], ..., [PAD],
         All non-PAD tokens are valid, will have a mask value of 1.
@@ -436,10 +439,13 @@ class RecursiveCaptionDataset(data.Dataset):
         # COOT video text data as input
         max_v_l = self.max_v_len - 2
         # future
-        raw_feat, valid_l, future =\
-            self._get_vt_features(raw_feat, clip_idx, max_v_l, future_feats)
-        video_tokens = [self.CLS_TOKEN] + [self.VID_TOKEN] * valid_l +\
-                        [self.SEP_TOKEN] + [self.PAD_TOKEN] * (max_v_l - valid_l)
+        raw_feat, valid_l, past, future =\
+            self._get_vt_features(
+                raw_feat, clip_idx, max_v_l, past_feats, future_feats
+            )
+        video_tokens =\
+            [self.CLS_TOKEN] + [self.VID_TOKEN] * valid_l + [self.SEP_TOKEN]\
+            + [self.PAD_TOKEN] * (max_v_l - valid_l)
         mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
         # 上記のように特徴量を配置
         # feat∈25×1152
@@ -450,8 +456,10 @@ class RecursiveCaptionDataset(data.Dataset):
         # future
         # includes [CLS], [SEP]
         future_feat =\
-            np.zeros((self.max_v_len + self.max_t_len, future.shape[1]))
-        future_feat[1:4] = future
+            np.zeros((2, past_feats.shape[1]))
+        future_feat[0] = past
+        future_feat[1] = future
+
         # feat = raw_feat
         # return feat, video_tokens, mask
         # future

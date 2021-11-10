@@ -644,11 +644,8 @@ class MemoryUpdater(nn.Module):
         n_memory_cells = prev_m.shape[1]
         update_mask = attention_mask.unsqueeze(1).repeat(1, n_memory_cells, 1)  # (N, M, L)
         s_t = self.memory_update_attention(prev_m, input_states, input_states, update_mask)  # (N, M, D),
-
         c_t = torch.tanh(self.mc(prev_m) + self.sc(s_t))  # (N, M, D)
-
         z_t = torch.sigmoid(self.mz(prev_m) + self.sz(s_t))  # (N, M, D)
-
         updated_memory = (1 - z_t) * c_t + z_t * prev_m  # (N, M, D)
         return updated_memory
 
@@ -684,12 +681,15 @@ class LMPredictionHead(nn.Module):
             assert config.hidden_size == bert_model_embedding_weights.size(1),\
                 "hidden size has be the same as word embedding size when "\
                 "sharing word embedding weight and classifier weight"
-            self.decoder = nn.Linear(bert_model_embedding_weights.size(1),
-                                     bert_model_embedding_weights.size(0),
-                                     bias=False)
+            self.decoder = nn.Linear(
+                                    bert_model_embedding_weights.size(1),
+                                    bert_model_embedding_weights.size(0),
+                                    bias=False)
             self.decoder.weight = bert_model_embedding_weights
         else:
-            self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+            self.decoder = nn.Linear(
+                            config.hidden_size, config.vocab_size, bias=False
+                            )
 
         self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
@@ -842,7 +842,13 @@ class RecursiveTransformer(nn.Module):
             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-
+        input_size = 384
+        self.pred_f = nn.Sequential(
+            nn.Linear(input_size, 2 * input_size),
+            nn.ReLU(),
+            nn.Linear(2 * input_size, input_size)
+        )
+        self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
@@ -860,7 +866,7 @@ class RecursiveTransformer(nn.Module):
             module.bias.data.zero_()
 
     def forward_step(self, input_ids, video_features, input_masks,
-                     token_type_ids):
+                    token_type_ids):
         """
         single step forward in the recursive structure
         """
@@ -888,19 +894,24 @@ class RecursiveTransformer(nn.Module):
 
         Returns:
         """
-        # _, video_feature = self.lstm(video_features_list)
         # [(N, M, D)] * num_hidden_layers, initialized internally
-        prev_ms = [None] * self.cfg.num_hidden_layers
         step_size = len(input_ids_list)
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
+        future_rec = []
+        future_gt = []
         for idx in range(step_size):
-            video_features_list[idx][:, 2, :] = gt_clip[idx][:, 2, :]
+            future_b = torch.zeros(video_features_list[idx][:, 3, :].shape)
+            future_b = video_features_list[idx][:, 3, :].clone()
+            video_features_list[idx][:, 2, :] = gt_clip[idx][:, 0, :]
+            pred_future = self.pred_f(future_b)
+            video_features_list[idx][:, 3, :] = pred_future.clone()
             encoded_layer_outputs, prediction_scores =\
             self.forward_step(input_ids_list[idx], video_features_list[idx],
-                                input_masks_list[idx], token_type_ids_list[idx])           
-            memory_list.append(prev_ms)
+                                input_masks_list[idx], token_type_ids_list[idx])
+            future_gt.append(gt_clip[idx][:, 1, :])
+            future_rec.append(pred_future)
             encoded_outputs_list.append(encoded_layer_outputs)
             prediction_scores_list.append(prediction_scores)
 
@@ -910,7 +921,9 @@ class RecursiveTransformer(nn.Module):
             # compute loss, get predicted words
             caption_loss = 0.0
             for idx in range(step_size):
-                tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
-                                               input_labels_list[idx].view(-1))
-                caption_loss += tmp_loss
+                snt_loss =  self.loss_func(
+                    prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+                    input_labels_list[idx].view(-1))
+                fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+                caption_loss = snt_loss + caption_loss + fut_loss
             return caption_loss, prediction_scores_list
