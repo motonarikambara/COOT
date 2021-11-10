@@ -27,7 +27,7 @@ def compare_res(res_path, out_path):
                 time = clip["timestamp"]
                 gen_sent = clip["sentence"]
                 gt_sent = clip["gt_sentence"]
-                compare = "{}: {}  {}\n".format(time, gen_sent, gt_sent)
+                compare = "{}: '{}' '{}'\n".format(time, gen_sent, gt_sent)
                 f.write(compare)
 
 
