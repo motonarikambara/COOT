@@ -220,8 +220,10 @@ class Translator(object):
                 # if dec_idx < max_v_len + 5:
                 #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
                 copied_prev_ms = copy.deepcopy(prev_ms_)  # since the func is changing data inside
-                _, _, pred_scores = model.forward_step(
-                    copied_prev_ms, input_ids, video_features, input_masks, token_type_ids)
+                # _, _, pred_scores = model.forward_step(
+                #     copied_prev_ms, input_ids, video_features, input_masks, token_type_ids)
+                _, pred_scores = model.forward_step(
+                    input_ids, video_features, input_masks, token_type_ids)
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
                 # next_words = pred_scores.max(2)[1][:, dec_idx]
@@ -230,14 +232,17 @@ class Translator(object):
 
             # compute memory, mimic the way memory is generated at training time
             input_ids, input_masks = mask_tokens_after_eos(input_ids, input_masks)
-            cur_ms, _, pred_scores = model.forward_step(
-                prev_ms_, input_ids, video_features, input_masks, token_type_ids)
+            # cur_ms, _, pred_scores = model.forward_step(
+            #     prev_ms_, input_ids, video_features, input_masks, token_type_ids)
+            _, pred_scores = model.forward_step(
+                input_ids, video_features, input_masks, token_type_ids)
 
             # logger.info("input_ids[:, max_v_len:] {}".format(input_ids[:, max_v_len:]))
             # import sys
             # sys.exit(1)
 
-            return cur_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
+            # return cur_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
+            return copied_prev_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
 
         input_ids_list, input_masks_list = self.prepare_video_only_inputs(
             input_ids_list, input_masks_list, token_type_ids_list)
@@ -280,8 +285,10 @@ class Translator(object):
                 # if dec_idx < max_v_len + 5:
                 #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
                 copied_prev_ms = copy.deepcopy(prev_ms_)  # since the func is changing data inside
-                _, _, pred_scores = model.forward_step(
-                    copied_prev_ms, input_ids, video_features, token_type_ids, input_masks, prev_masks_)
+                # _, _, pred_scores = model.forward_step(
+                #     copied_prev_ms, input_ids, video_features, token_type_ids, input_masks, prev_masks_)
+                _, pred_scores = model.forward_step(
+                    input_ids, video_features, token_type_ids, input_masks, prev_masks_)
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
                 # next_words = pred_scores.max(2)[1][:, dec_idx]
@@ -290,8 +297,10 @@ class Translator(object):
 
             # compute memory, mimic the way memory is generated at training time
             input_ids, input_masks = mask_tokens_after_eos(input_ids, input_masks)
-            cur_ms, _, pred_scores = model.forward_step(
-                prev_ms_, input_ids, video_features, token_type_ids, input_masks, prev_masks_)
+            # cur_ms, _, pred_scores = model.forward_step(
+            #     prev_ms_, input_ids, video_features, token_type_ids, input_masks, prev_masks_)
+            _, pred_scores = model.forward_step(
+                input_ids, video_features, token_type_ids, input_masks, prev_masks_)
 
             # logger.info("input_ids[:, max_v_len:] {}".format(input_ids[:, max_v_len:]))
             # import sys

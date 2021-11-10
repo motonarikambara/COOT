@@ -421,6 +421,55 @@ class EncoderWithMemory(nn.Module):
         return prev_ms, all_encoder_layers
 
 
+class LayerWoMemory(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.attention = Attention(config)
+        self.hidden_intermediate = Intermediate(config)
+        self.output = Output(config)
+
+    def forward(self, hidden_states, attention_mask):
+        """
+        Args:
+            prev_m: (N, M, D)
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+        Returns:
+        """
+        max_v_len, max_t_len = self.config.max_v_len, self.config.max_t_len
+        # self-attention, need to shift right
+        shifted_self_mask = make_pad_shifted_mask(attention_mask, max_v_len, max_t_len)  # (N, L, L)
+        attention_output = self.attention(hidden_states, shifted_self_mask)
+        intermediate_output = self.hidden_intermediate(attention_output)
+
+        return intermediate_output
+
+
+class EncoderWoMemory(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.layer = nn.ModuleList([LayerWoMemory(config) for _ in range(config.num_hidden_layers)])
+
+    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True):
+        """
+        Args:
+            prev_ms: [(N, M, D), ] * num_hidden_layers or None at first step. Memory states for each layer
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+            output_all_encoded_layers:
+
+        Returns:
+        """
+        all_encoder_layers = []
+        for layer_idx, layer_module in enumerate(self.layer):
+            hidden_states = layer_module(hidden_states, attention_mask)
+            if output_all_encoded_layers:
+                all_encoder_layers.append(hidden_states)
+        if not output_all_encoded_layers:
+            all_encoder_layers.append(hidden_states)
+        return all_encoder_layers
+
 class DecoderLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -690,13 +739,101 @@ class PositionwiseFF(nn.Module):
 
 
 
+# # MART model
+# class RecursiveTransformer(nn.Module):
+#     def __init__(self, cfg: MartConfig):
+#         super().__init__()
+#         self.cfg = cfg
+#         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
+#         self.encoder = EncoderWithMemory(cfg)
+#         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
+#             if self.cfg.share_wd_cls_weight else None
+#         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
+#         self.transformerdecoder = Decoder(cfg)
+#         if self.cfg.label_smoothing != 0:
+#             self.loss_func = LabelSmoothingLoss(cfg.label_smoothing, cfg.vocab_size, ignore_index=-1)
+#         else:
+#             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+
+#         self.apply(self.init_bert_weights)
+
+#     def init_bert_weights(self, module):
+#         """
+#         Initialize the weights.
+#         """
+#         if isinstance(module, (nn.Linear, nn.Embedding)):
+#             # Slightly different from the TF version which uses truncated_normal for initialization
+#             # cf https://github.com/pytorch/pytorch/pull/5617
+#             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
+#         elif isinstance(module, LayerNorm):
+#             module.bias.data.zero_()
+#             module.weight.data.fill_(1.0)
+#         if isinstance(module, nn.Linear) and module.bias is not None:
+#             module.bias.data.zero_()
+
+#     def forward_step(self, prev_ms, input_ids, video_features, input_masks,
+#                      token_type_ids):
+#         """
+#         single step forward in the recursive structure
+#         """
+#         embeddings = self.embeddings(input_ids, video_features, token_type_ids)  # (N, L, D)
+
+#         prev_ms, encoded_layer_outputs = self.encoder(
+#             prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
+#         decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
+#         prediction_scores = self.decoder(decoded_layer_outputs[-1])  # (N, L, vocab_size)
+#         return prev_ms, encoded_layer_outputs, prediction_scores
+
+#     #ver. future
+#     def forward(self, input_ids_list, video_features_list, input_masks_list,
+#                 token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
+#         """
+#         Args:
+#             input_ids_list: [(N, L)] * step_size
+#             video_features_list: [(N, L, D_v)] * step_size
+#             input_masks_list: [(N, L)] * step_size with 1 indicates valid bits
+#             token_type_ids_list: [(N, L)] * step_size, with `0` on the first `max_v_len` bits,
+#                 `1` on the last `max_t_len`
+#             input_labels_list: [(N, L)] * step_size, with `-1` on ignored positions,
+#                 will not be used when return_memory is True, thus can be None in this case
+#             return_memory: bool,
+
+#         Returns:
+#         """
+#         # _, video_feature = self.lstm(video_features_list)
+#         # [(N, M, D)] * num_hidden_layers, initialized internally
+#         prev_ms = [None] * self.cfg.num_hidden_layers
+#         step_size = len(input_ids_list)
+#         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
+#         encoded_outputs_list = []  # [(N, L, D)] * step_size
+#         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
+#         for idx in range(step_size):
+#             prev_ms, encoded_layer_outputs, prediction_scores =\
+#             self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
+#                                 input_masks_list[idx], token_type_ids_list[idx])           
+#             memory_list.append(prev_ms)
+#             encoded_outputs_list.append(encoded_layer_outputs)
+#             prediction_scores_list.append(prediction_scores)
+
+#         if return_memory:  # used to analyze memory
+#             return memory_list
+#         else:  # normal training/evaluation mode
+#             # compute loss, get predicted words
+#             caption_loss = 0.0
+#             for idx in range(step_size):
+#                 tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
+#                                                input_labels_list[idx].view(-1))
+#                 caption_loss += tmp_loss
+#             return caption_loss, prediction_scores_list
+
+
 # MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
-        self.encoder = EncoderWithMemory(cfg)
+        self.encoder = EncoderWoMemory(cfg)
         decoder_classifier_weight = self.embeddings.word_embeddings.weight\
             if self.cfg.share_wd_cls_weight else None
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
@@ -706,12 +843,6 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
 
-        # self.future_linear = nn.Sequential(nn.Linear(384, 786),
-        #                                     nn.GELU(),
-        #                                     nn.Linear(786, 384),
-        #                                     nn.GELU())
-        # self.future_linear = nn.Linear(384, 384)
-        # self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
@@ -728,18 +859,18 @@ class RecursiveTransformer(nn.Module):
         if isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
 
-    def forward_step(self, prev_ms, input_ids, video_features, input_masks,
+    def forward_step(self, input_ids, video_features, input_masks,
                      token_type_ids):
         """
         single step forward in the recursive structure
         """
         embeddings = self.embeddings(input_ids, video_features, token_type_ids)  # (N, L, D)
 
-        prev_ms, encoded_layer_outputs = self.encoder(
-            prev_ms, embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
+        encoded_layer_outputs = self.encoder(
+            embeddings, input_masks, output_all_encoded_layers=False)  # both outputs are list
         decoded_layer_outputs = self.transformerdecoder(encoded_layer_outputs[-1], input_masks)
         prediction_scores = self.decoder(decoded_layer_outputs[-1])  # (N, L, vocab_size)
-        return prev_ms, encoded_layer_outputs, prediction_scores
+        return encoded_layer_outputs, prediction_scores
 
     #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
@@ -764,10 +895,10 @@ class RecursiveTransformer(nn.Module):
         memory_list = []  # [(N, M, D)] * num_hidden_layers * step_size
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        future_loss = 0
         for idx in range(step_size):
-            prev_ms, encoded_layer_outputs, prediction_scores =\
-            self.forward_step(prev_ms, input_ids_list[idx], video_features_list[idx],
+            video_features_list[idx][:, 2, :] = gt_clip[idx][:, 2, :]
+            encoded_layer_outputs, prediction_scores =\
+            self.forward_step(input_ids_list[idx], video_features_list[idx],
                                 input_masks_list[idx], token_type_ids_list[idx])           
             memory_list.append(prev_ms)
             encoded_outputs_list.append(encoded_layer_outputs)
@@ -781,6 +912,5 @@ class RecursiveTransformer(nn.Module):
             for idx in range(step_size):
                 tmp_loss =  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
-                caption_loss += 0.1 * tmp_loss
-                caption_loss += future_loss
+                caption_loss += tmp_loss
             return caption_loss, prediction_scores_list
