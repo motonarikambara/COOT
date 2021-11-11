@@ -543,7 +543,7 @@ class EmbeddingsWithVideo(nn.Module):
         )
         self.video_embeddings = nn.Sequential(
             LayerNorm(config.video_feature_size, eps=config.layer_norm_eps),
-            nn.Dropout(config.hidden_dropout_prob),
+            # nn.Dropout(config.hidden_dropout_prob),
             nn.Linear(config.video_feature_size, config.hidden_size),
             nn.ReLU(True),
             LayerNorm(config.hidden_size, eps=config.layer_norm_eps),
@@ -709,32 +709,26 @@ class PositionwiseFF(nn.Module):
         self.d_model = d_model
         self.d_inner = d_inner
         self.dropout = dropout
-
         self.CoreNet = nn.Sequential(
             nn.Linear(d_model, d_inner), nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(d_inner, d_model),
             nn.Dropout(dropout),
         )
-
         self.layer_norm = nn.LayerNorm(d_model)
-
         self.pre_lnorm = pre_lnorm
 
     def forward(self, inp):
         if self.pre_lnorm:
             # layer normalization + positionwise feed-forward
             core_out = self.CoreNet(self.layer_norm(inp))
-
             # residual connection
             output = core_out + inp
         else:
             # positionwise feed-forward
             core_out = self.CoreNet(inp)
-
             # residual connection + layer normalization
             output = self.layer_norm(inp + core_out)
-
         return output
 
 
@@ -846,7 +840,8 @@ class RecursiveTransformer(nn.Module):
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, 2 * input_size),
             nn.ReLU(),
-            nn.Linear(2 * input_size, input_size)
+            nn.Linear(2 * input_size, input_size),
+            nn.LayerNorm((input_size))
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)

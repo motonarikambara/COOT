@@ -7,28 +7,35 @@
 """
 
 import sys
+import csv
 import json
 
 
 def compare_res(res_path, out_path):
     """
     Args:
-        res_path(string): 結果のファイルパス
-        out_path(string): エラー分析のための出力ファイルパス
+        res_path(string): 結果のファイルパス(json)
+        out_path(string): エラー分析のための出力ファイルパス(csv)
     """
     with open(res_path, "r") as f:
         res = json.load(f)
     res = res["results"]
+    comp = []
+    header = ["timestamp", "gen_sent", "gt_sent"]
+    comp.append(header)
+
+    for vid in res:
+        video = res[vid]
+        for clip in video:
+            tmp_comp = []
+            tmp_comp.append(clip["timestamp"])
+            tmp_comp.append(clip["sentence"])
+            tmp_comp.append(clip["gt_sentence"])
+            comp.append(tmp_comp)
+
     with open(out_path, "w") as f:
-        f.write("timestamp: gen_sent  gt_sent\n")
-        for vid in res:
-            video = res[vid]
-            for clip in video:
-                time = clip["timestamp"]
-                gen_sent = clip["sentence"]
-                gt_sent = clip["gt_sentence"]
-                compare = "{}: '{}' '{}'\n".format(time, gen_sent, gt_sent)
-                f.write(compare)
+        writer = csv.writer(f)
+        writer.writerows(comp)
 
 
 def main(paths):
