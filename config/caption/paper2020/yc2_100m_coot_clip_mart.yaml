@@ -9,7 +9,7 @@ train:
 label_smoothing: 0.1
 # ---------- Validation ----------
 val:
-    batch_size: 50
+    batch_size: 20
     val_freq: 1
     val_start: 0
     det_best_field: "cider"
