@@ -256,14 +256,17 @@ class Attention(nn.Module):
         self.self = SelfAttention(cfg)
         self.output = SelfOutput(cfg)
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, attention_mask=None, clip_his=None):
         """
         Args:
             input_tensor: (N, L, D)
             attention_mask: (N, Lq, L)
         Returns:
         """
-        self_output = self.self(x, x, x, attention_mask)
+        if clip_his is not None:
+            self_output = self.self(clip_his, x, x, attention_mask)
+        else:
+            self_output = self.self(x, x, x, attention_mask)
         att = self.output(self_output, x)
         return att
 
@@ -443,7 +446,7 @@ class DecoderLayer(nn.Module):
         self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
 
-    def forward(self, x, attention_mask):
+    def forward(self, x, attention_mask, clip_his):
         """
         Args:
             prev_m: (N, M, D)
@@ -456,7 +459,7 @@ class DecoderLayer(nn.Module):
         shifted_self_mask = make_pad_shifted_mask(
             attention_mask, max_v_len, max_t_len, decoder=True
         )  # (N, L, L)
-        att = self.attention(x, shifted_self_mask)
+        att = self.attention(x, shifted_self_mask, clip_his)
         layer_output = self.output(att, att)  # (N, L, D)
         return layer_output
 
@@ -468,7 +471,7 @@ class Decoder(nn.Module):
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
         )
 
-    def forward(self, hidden_states, attention_mask):
+    def forward(self, hidden_states, attention_mask, clip_his):
         """
         Args:
             hidden_states: (N, L, D)
@@ -479,7 +482,7 @@ class Decoder(nn.Module):
         """
         all_decoder_layers = []
         for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, attention_mask)
+            hidden_states = layer_module(hidden_states, attention_mask, clip_his)
             all_decoder_layers.append(hidden_states)
         return all_decoder_layers
 
@@ -666,18 +669,23 @@ class TimeSeriesMoudule(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.cfg.hidden_size = 384
+        self.hidden_size = 768
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
+        self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
+        self.conv = nn.Conv1d(3, 1, 1)
         self.layernorm = nn.LayerNorm(self.cfg.hidden_size)
         self.cfg.hidden_size = 768
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
         ts_feats = self.TSEncoder(ts_feats)
-        x = x + ts_feats
-        x = self.dense(x)
-        x = self.layernorm(x)
-        return x
+        ts_feats = self.expand(ts_feats)
+        ts_feats = self.conv(ts_feats)
+        # x = x + ts_feats
+        # x = self.dense(x)
+        # x = self.layernorm(x)
+        return x, ts_feats
 
 
 # MART model
@@ -726,23 +734,40 @@ class RecursiveTransformer(nn.Module):
         if isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
 
-    def forward_step(self, input_ids, video_features, input_masks, token_type_ids):
+    def forward_step(self, input_ids, video_features, input_masks, token_type_ids, gt_clip):
         """
         single step forward in the recursive structure
         """
+        # preprocess
+        clip_feats = torch.zeros(video_features[:, 1:4, :].shape)
+        clip_feats[:, 1, :] = video_features[:, 1, :].clone()
+        future_b = torch.zeros(video_features[:, 3, :].shape)
+        future_b = video_features[:, 3, :].clone()
+        clip_feats[:, 0, :] = gt_clip[:, 0, :].clone()
+        pred_future = self.pred_f(future_b)
+        clip_feats[:, 2, :] = pred_future.clone()
+        clip_feats = clip_feats.cuda()
+
+        # Time Series Module
+        clip_feats, ts_feats = self.TSModule(clip_feats)
+        ts_feats.view((-1, 1, self.cfg.hidden_size))
+        video_features[:, 1:4, :] = clip_feats
+
         embeddings = self.embeddings(
             input_ids, video_features, token_type_ids
         )  # (N, L, D)
+        clip_his = torch.zeros((embeddings.shape)).cuda()
+        clip_his = clip_his + ts_feats
         encoded_layer_outputs = self.encoder(
             embeddings, input_masks, output_all_encoded_layers=False
         )  # both outputs are list
         decoded_layer_outputs = self.transformerdecoder(
-            encoded_layer_outputs[-1], input_masks
+            encoded_layer_outputs[-1], input_masks, clip_his
         )
         prediction_scores = self.decoder(
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
-        return encoded_layer_outputs, prediction_scores
+        return encoded_layer_outputs, prediction_scores, pred_future
 
     # ver. future
     def forward(
@@ -774,24 +799,12 @@ class RecursiveTransformer(nn.Module):
         future_rec = []
         future_gt = []
         for idx in range(step_size):
-            clip_feats = torch.zeros(video_features_list[idx][:, 1:4, :].shape)
-            clip_feats[:, 0, :] = video_features_list[idx][:, 1, :].clone()
-            future_b = torch.zeros(video_features_list[idx][:, 3, :].shape)
-            future_b = video_features_list[idx][:, 3, :].clone()
-            clip_feats[:, 1, :] = gt_clip[idx][:, 0, :].clone()
-            pred_future = self.pred_f(future_b)
-            clip_feats[:, 2, :] = pred_future.clone()
-            clip_feats = clip_feats.cuda()
-
-            # Time Series Module
-            clip_feats = self.TSModule(clip_feats)
-            video_features_list[idx][:, 1:4, :] = clip_feats
-
-            encoded_layer_outputs, prediction_scores = self.forward_step(
+            encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
                 input_ids_list[idx],
                 video_features_list[idx],
                 input_masks_list[idx],
                 token_type_ids_list[idx],
+                gt_clip[idx]
             )
             future_gt.append(gt_clip[idx][:, 1, :])
             future_rec.append(pred_future)
