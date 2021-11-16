@@ -217,11 +217,7 @@ class Translator(object):
             for dec_idx in range(max_v_len, max_v_len + max_t_len):
                 input_ids[:, dec_idx] = next_symbols
                 input_masks[:, dec_idx] = 1
-                # if dec_idx < max_v_len + 5:
-                #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
                 copied_prev_ms = copy.deepcopy(prev_ms_)  # since the func is changing data inside
-                # _, _, pred_scores = model.forward_step(
-                #     copied_prev_ms, input_ids, video_features, input_masks, token_type_ids)
                 _, pred_scores, _ = model.forward_step(
                     input_ids, video_features, input_masks, token_type_ids, future_feat_list)
                 # suppress unk token; (N, L, vocab_size)
@@ -232,16 +228,6 @@ class Translator(object):
 
             # compute memory, mimic the way memory is generated at training time
             input_ids, input_masks = mask_tokens_after_eos(input_ids, input_masks)
-            # cur_ms, _, pred_scores = model.forward_step(
-            #     prev_ms_, input_ids, video_features, input_masks, token_type_ids)
-            # _, pred_scores, _ = model.forward_step(
-            #     input_ids, video_features, input_masks, token_type_ids, future_feat_list)
-
-            # logger.info("input_ids[:, max_v_len:] {}".format(input_ids[:, max_v_len:]))
-            # import sys
-            # sys.exit(1)
-
-            # return cur_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
             return copied_prev_ms, input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
 
         input_ids_list, input_masks_list = self.prepare_video_only_inputs(
@@ -335,7 +321,7 @@ class Translator(object):
         """
         if use_beam:
             if recurrent:
-                input_ids_list, video_features_list, input_masks_list, token_type_ids_list = model_inputs
+                input_ids_list, video_features_list, input_masks_list, token_type_ids_list, future_feat_list = model_inputs
                 return self.translate_batch_beam(
                     input_ids_list, video_features_list, input_masks_list, token_type_ids_list,
                     self.model, beam_size=self.cfg.beam_size, n_best=self.cfg.n_best,

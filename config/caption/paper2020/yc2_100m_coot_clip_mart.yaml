@@ -19,7 +19,7 @@ val:
     det_best_terminate_after: 10
 save_mode: "best"
 # beam search
-use_beam: false
+use_beam: False
 beam_size: 2
 n_best: 1
 # generated sentence bounds
