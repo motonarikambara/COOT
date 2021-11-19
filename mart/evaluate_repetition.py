@@ -35,7 +35,7 @@ def get_ngrams(words_pred, unigrams, bigrams, trigrams, fourgrams):
     for i, w in enumerate(words_pred):
         if i < len(words_pred) - 1:
             w_next = words_pred[i + 1]
-            bigram = '%s_%s' % (w, w_next)
+            bigram = "%s_%s" % (w, w_next)
             if bigram not in bigrams:
                 bigrams[bigram] = 0
             bigrams[bigram] += 1
@@ -44,7 +44,7 @@ def get_ngrams(words_pred, unigrams, bigrams, trigrams, fourgrams):
         if i < len(words_pred) - 2:
             w_next = words_pred[i + 1]
             w_next_ = words_pred[i + 2]
-            tri = '%s_%s_%s' % (w, w_next, w_next_)
+            tri = "%s_%s_%s" % (w, w_next, w_next_)
             if tri not in trigrams:
                 trigrams[tri] = 0
             trigrams[tri] += 1
@@ -54,7 +54,7 @@ def get_ngrams(words_pred, unigrams, bigrams, trigrams, fourgrams):
             w_next = words_pred[i + 1]
             w_next_ = words_pred[i + 2]
             w_next__ = words_pred[i + 3]
-            four = '%s_%s_%s_%s' % (w, w_next, w_next_, w_next__)
+            four = "%s_%s_%s_%s" % (w, w_next, w_next_, w_next__)
             if four not in fourgrams:
                 fourgrams[four] = 0
             fourgrams[four] += 1
@@ -63,7 +63,7 @@ def get_ngrams(words_pred, unigrams, bigrams, trigrams, fourgrams):
 
 def evaluate_repetition(data_predicted, data_gt, verbose=False):
     if verbose:
-        print('#### Per video ####')
+        print("#### Per video ####")
 
     num_pred = len(data_predicted)
     num_gt = len(data_gt)
@@ -89,26 +89,44 @@ def evaluate_repetition(data_predicted, data_gt, verbose=False):
             pred_sentence = e["sentence"]
 
             if len(pred_sentence) > 0:
-                if pred_sentence[-1] == '.':
+                if pred_sentence[-1] == ".":
                     pred_sentence = pred_sentence[0:-1]
-                while pred_sentence[-1] == ' ':
+                while pred_sentence[-1] == " ":
                     pred_sentence = pred_sentence[0:-1]
-                pred_sentence = pred_sentence.replace(',', ' ')
-            while '  ' in pred_sentence:
-                pred_sentence = pred_sentence.replace('  ', ' ')
+                pred_sentence = pred_sentence.replace(",", " ")
+            while "  " in pred_sentence:
+                pred_sentence = pred_sentence.replace("  ", " ")
 
-            words_pred = pred_sentence.split(' ')
-            unigrams, bigrams, trigrams, fourgrams = get_ngrams(words_pred, unigrams, bigrams, trigrams, fourgrams)
+            words_pred = pred_sentence.split(" ")
+            unigrams, bigrams, trigrams, fourgrams = get_ngrams(
+                words_pred, unigrams, bigrams, trigrams, fourgrams
+            )
 
         sum_re1 = float(sum([unigrams[f] for f in unigrams]))
         sum_re2 = float(sum([bigrams[f] for f in bigrams]))
         sum_re3 = float(sum([trigrams[f] for f in trigrams]))
         sum_re4 = float(sum([fourgrams[f] for f in fourgrams]))
 
-        vid_re1 = float(sum([max(unigrams[f] - 1, 0) for f in unigrams])) / sum_re1 if sum_re1 != 0 else 0
-        vid_re2 = float(sum([max(bigrams[f] - 1, 0) for f in bigrams])) / sum_re2 if sum_re2 != 0 else 0
-        vid_re3 = float(sum([max(trigrams[f] - 1, 0) for f in trigrams])) / sum_re3 if sum_re3 != 0 else 0
-        vid_re4 = float(sum([max(fourgrams[f] - 1, 0) for f in fourgrams])) / sum_re4 if sum_re4 != 0 else 0
+        vid_re1 = (
+            float(sum([max(unigrams[f] - 1, 0) for f in unigrams])) / sum_re1
+            if sum_re1 != 0
+            else 0
+        )
+        vid_re2 = (
+            float(sum([max(bigrams[f] - 1, 0) for f in bigrams])) / sum_re2
+            if sum_re2 != 0
+            else 0
+        )
+        vid_re3 = (
+            float(sum([max(trigrams[f] - 1, 0) for f in trigrams])) / sum_re3
+            if sum_re3 != 0
+            else 0
+        )
+        vid_re4 = (
+            float(sum([max(fourgrams[f] - 1, 0) for f in fourgrams])) / sum_re4
+            if sum_re4 != 0
+            else 0
+        )
 
         re1.append(vid_re1)
         re2.append(vid_re2)
@@ -122,13 +140,17 @@ def evaluate_repetition(data_predicted, data_gt, verbose=False):
         re4=np.mean(re4),
         num_pred=num_pred,
         num_gt=num_gt,
-        num_evaluated=num_evaluated
+        num_evaluated=num_evaluated,
     )
     return repetition_scores
 
 
-def evaluate_repetition_files(submission_file: str, reference_file: str, output_file: Optional[Union[str, Path]] = None,
-                              verbose: bool = False):
+def evaluate_repetition_files(
+    submission_file: str,
+    reference_file: str,
+    output_file: Optional[Union[str, Path]] = None,
+    verbose: bool = False,
+):
     # load input data
     sub_data = json.load(open(submission_file, "r"))
     ref_data = json.load(open(reference_file, "r"))

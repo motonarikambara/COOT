@@ -6,7 +6,7 @@ train:
     num_epochs: 25
     loss_func: "crossentropy"
     clip_gradient: 1
-label_smoothing: 0.5
+label_smoothing: 0.1
 # ---------- Validation ----------
 val:
     batch_size: 16

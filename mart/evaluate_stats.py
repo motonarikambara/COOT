@@ -37,8 +37,12 @@ def get_sen_stat(list_of_str):
     return {"vocab_size": len(full_vocab), "avg_sen_len": avg_len, "num_sen": num_sen}
 
 
-def evaluate_stats_files(submission_file: str, reference_file: str, output_file: Optional[Union[str, Path]] = None,
-                         verbose: bool = False) -> Dict[str, Any]:
+def evaluate_stats_files(
+    submission_file: str,
+    reference_file: str,
+    output_file: Optional[Union[str, Path]] = None,
+    verbose: bool = False,
+) -> Dict[str, Any]:
     """
     Get vocab size, average length, etc
     """
@@ -49,15 +53,16 @@ def evaluate_stats_files(submission_file: str, reference_file: str, output_file:
     ref_data = ref_data["results"] if "results" in ref_data else ref_data
     sub_data = {k: v for k, v in list(sub_data.items()) if k in ref_data}
 
-    submission_data_entries = [item for sublist in list(sub_data.values()) for item in sublist]
+    submission_data_entries = [
+        item for sublist in list(sub_data.values()) for item in sublist
+    ]
     submission_sentences = [e["sentence"] for e in submission_data_entries]
     submission_stat = get_sen_stat(submission_sentences)
 
     if verbose:
         for k in submission_stat:
             print(("{} submission {}".format(k, submission_stat[k])))
-    final_res = {
-        "submission": submission_stat}
+    final_res = {"submission": submission_stat}
 
     if "gt_sentence" in submission_data_entries[0]:
         gt_sentences = [e["gt_sentence"] for e in submission_data_entries]

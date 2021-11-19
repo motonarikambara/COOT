@@ -50,14 +50,8 @@ def create_mart_model(
     cfg.max_position_embeddings = cfg.max_v_len + cfg.max_t_len
     cfg.vocab_size = vocab_size
     if cfg.recurrent:
-        if cfg.xl:
-            # logger.info(f"Use recurrent model - TransformerXL with gradient {cfg.xl_grad}")
-            # model = TransformerXL(cfg)
-            print("XL should be false")
-            sys.exit()
-        else:
-            logger.info("Use recurrent model - Mine")
-            model = RecursiveTransformer(cfg)
+        logger.info("Use recurrent model - Mine")
+        model = RecursiveTransformer(cfg)
     if cfg.use_glove:
         if hasattr(model, "embeddings"):
             logger.info("Load GloVe as word embedding")
@@ -162,6 +156,7 @@ class SelfAttention(nn.Module):
     """
     Attentionの計算
     """
+
     def __init__(self, cfg):
         super().__init__()
         if cfg.hidden_size % cfg.num_attention_heads != 0:
@@ -170,10 +165,8 @@ class SelfAttention(nn.Module):
                 "heads (%d)" % (cfg.hidden_size, cfg.num_attention_heads)
             )
         self.num_attention_heads = cfg.num_attention_heads
-        self.attention_head_size =\
-            int(cfg.hidden_size / cfg.num_attention_heads)
-        self.all_head_size =\
-            self.num_attention_heads * self.attention_head_size
+        self.attention_head_size = int(cfg.hidden_size / cfg.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         self.query_w = nn.Linear(cfg.hidden_size, self.all_head_size)
         self.key_w = nn.Linear(cfg.hidden_size, self.all_head_size)
@@ -203,7 +196,9 @@ class SelfAttention(nn.Module):
         # (last dim) is applied, as another dim (second last)
         # will be ignored in future computation anyway
         if attention_mask is not None:
-            attention_mask = (1 - attention_mask.unsqueeze(1)) * -10000.0  # (N, 1, Lq, L)
+            attention_mask = (
+                1 - attention_mask.unsqueeze(1)
+            ) * -10000.0  # (N, 1, Lq, L)
         mixed_query_layer = self.query_w(query)
         mixed_key_layer = self.key_w(key)
         mixed_value_layer = self.value_w(value)
@@ -234,6 +229,7 @@ class SelfOutput(nn.Module):
     """
     TransformerにおけるFF層
     """
+
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
@@ -251,6 +247,7 @@ class Attention(nn.Module):
     """
     TransformerにおけるMHA
     """
+
     def __init__(self, cfg):
         super().__init__()
         self.self = SelfAttention(cfg)
@@ -295,8 +292,7 @@ class Output(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.intermediate_size, cfg.hidden_size)
-        self.LayerNorm =\
-            LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -333,7 +329,7 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=Fa
         bsz, max_v_len + max_t_len, seq_len
     )  # (N, L, M+L)
     shifted_mask[:, :, : memory_len + max_v_len] = 1
-    shifted_mask[:, max_v_len:, memory_len + max_v_len:] = torch.tril(
+    shifted_mask[:, max_v_len:, memory_len + max_v_len :] = torch.tril(
         input_mask.new_ones(max_t_len, max_t_len), diagonal=0
     )
     if decoder:
@@ -465,7 +461,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=3):
+    def __init__(self, cfg, num_hidden_layers=5):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -507,13 +503,11 @@ class TrmEncLayer(nn.Module):
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=3):
+    def __init__(self, cfg, num_layers=2):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=384)
-        self.layers = nn.ModuleList(
-            [TrmEncLayer(self.cfg) for _ in range(num_layers)]
-        )
+        self.layers = nn.ModuleList([TrmEncLayer(self.cfg) for _ in range(num_layers)])
         self.ff = TrmFeedForward(self.cfg)
         self.layernorm = nn.LayerNorm((384))
 
@@ -565,9 +559,7 @@ class EmbeddingsWithVideo(nn.Module):
             self.position_embeddings = PositionEncoding(
                 n_filters=cfg.hidden_size, max_len=cfg.max_position_embeddings * 2
             )
-        self.token_type_embeddings = nn.Embedding(
-            cfg.type_vocab_size, cfg.hidden_size
-        )
+        self.token_type_embeddings = nn.Embedding(cfg.type_vocab_size, cfg.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -616,7 +608,8 @@ class PredictionHeadTransform(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.transform_act_fn = gelu
+        # self.transform_act_fn = gelu
+        self.gelu = nn.GELU()
         self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
     def forward(self, hidden_states):
@@ -624,7 +617,7 @@ class PredictionHeadTransform(nn.Module):
         (N, L, D)
         """
         hidden_states = self.dense(hidden_states)
-        hidden_states = self.transform_act_fn(hidden_states)
+        hidden_states = self.gelu(hidden_states)
         hidden_states = self.LayerNorm(hidden_states)
         return hidden_states
 
@@ -674,15 +667,17 @@ class TimeSeriesMoudule(nn.Module):
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
-        self.conv = nn.Conv1d(3, 1, 1)
-        self.layernorm = nn.LayerNorm(self.cfg.hidden_size)
+        # self.conv = nn.Conv1d(3, 1, 1)
+        self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
         ts_feats = self.TSEncoder(ts_feats)
         ts_feats = self.expand(ts_feats)
-        ts_feats = self.conv(ts_feats)
+        # ts_feats = self.conv(ts_feats)
+        ts_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
+        ts_feats = self.layernorm(ts_feats)
         # x = x + ts_feats
         # x = self.dense(x)
         # x = self.layernorm(x)
@@ -694,6 +689,8 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
+        self.z_f = torch.randn(1, requires_grad=True).cuda()
+        self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
         self.TSModule = TimeSeriesMoudule(cfg)
         self.encoder = EncoderWoMemory(cfg)
@@ -716,13 +713,15 @@ class RecursiveTransformer(nn.Module):
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
             nn.Linear(input_size * 2, input_size),
-            nn.LayerNorm((input_size))
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(input_size, input_size),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
             nn.ReLU(),
             nn.Linear(input_size, input_size),
-            nn.LayerNorm((3, input_size))
+            nn.Dropout(0.2),
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
@@ -742,7 +741,9 @@ class RecursiveTransformer(nn.Module):
         if isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
 
-    def forward_step(self, input_ids, video_features, input_masks, token_type_ids, gt_clip):
+    def forward_step(
+        self, input_ids, video_features, input_masks, token_type_ids, gt_clip
+    ):
         """
         single step forward in the recursive structure
         """
@@ -751,17 +752,19 @@ class RecursiveTransformer(nn.Module):
         # preprocess
         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         clip_feats[:, 1:3, :] = video_features[:, 1:3, :].clone()
-        tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).cuda()
+
         future_b = torch.zeros(video_features[:, 3, :].shape)
         future_b = video_features[:, 3, :].clone()
         future_b = self.pred_f(future_b)
-        clip_feats[:, 2, :] = clip_feats[:, 2, :] + future_b
-        past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).cuda()
-        past_feats = past_feats + tmp_feats
+        tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
+        clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
+
+        past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-        # clip_feats = clip_feats + video_features[:, 1:4, :]
+
         clip_feats = self.ff(clip_feats)
-        # pred_future = self.pred_f(future_b)
         # clip_feats[:, 2, :] = pred_future.clone()
         clip_feats = clip_feats.cuda()
 
@@ -798,7 +801,7 @@ class RecursiveTransformer(nn.Module):
         input_masks_list,
         token_type_ids_list,
         input_labels_list,
-        gt_clip
+        gt_clip,
     ):
         """
         Args:
@@ -820,22 +823,13 @@ class RecursiveTransformer(nn.Module):
         future_rec = []
         future_gt = []
         for idx in range(step_size):
-            encoded_layer_outputs, prediction_scores, pred_future =\
-                self.forward_step(
-                    input_ids_list[idx],
-                    video_features_list[idx],
-                    input_masks_list[idx],
-                    token_type_ids_list[idx],
-                    gt_clip[idx]
-                )
-            # encoded_layer_outputs, prediction_scores =\
-            #     self.forward_step(
-            #         input_ids_list[idx],
-            #         video_features_list[idx],
-            #         input_masks_list[idx],
-            #         token_type_ids_list[idx],
-            #         gt_clip[idx]
-            #     )
+            encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                input_ids_list[idx],
+                video_features_list[idx],
+                input_masks_list[idx],
+                token_type_ids_list[idx],
+                gt_clip[idx],
+            )
             future_gt.append(gt_clip[idx][:, 1, :])
             future_rec.append(pred_future)
             encoded_outputs_list.append(encoded_layer_outputs)

@@ -144,7 +144,9 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         self.debug: bool = config.pop("debug")
 
         # model
-        self.attention_probs_dropout_prob: float = config.pop("attention_probs_dropout_prob")
+        self.attention_probs_dropout_prob: float = config.pop(
+            "attention_probs_dropout_prob"
+        )
         self.hidden_dropout_prob: float = config.pop("hidden_dropout_prob")
         self.hidden_size: int = config.pop("hidden_size")
         self.intermediate_size: int = config.pop("intermediate_size")
@@ -187,7 +189,8 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         if self.share_wd_cls_weight:
             assert self.word_vec_size == self.hidden_size, (
                 "hidden size has to be the same as word embedding size when "
-                "sharing the word embedding weight and the final classifier weight")
+                "sharing the word embedding weight and the final classifier weight"
+            )
 
         # infer model type
         if self.recurrent:  # recurrent paragraphs
@@ -213,6 +216,7 @@ class MartMetersConst(ConstantHolder):
     """
     Additional metric fields.
     """
+
     TRAIN_LOSS_PER_WORD = "train/loss_word"
     TRAIN_ACC = "train/acc"
 
