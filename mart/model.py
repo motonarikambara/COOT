@@ -388,7 +388,7 @@ class LayerWoMemory(nn.Module):
         self.hidden_intermediate = Intermediate(cfg)
         self.output = Output(cfg)
 
-    def forward(self, hidden_states, attention_mask):
+    def forward(self, hidden_states, attention_mask, clip_feats=None):
         """
         Args:
             prev_m: (N, M, D)
@@ -401,7 +401,7 @@ class LayerWoMemory(nn.Module):
         shifted_self_mask = make_pad_shifted_mask(
             attention_mask, max_v_len, max_t_len
         )  # (N, L, L)
-        attention_output = self.attention(hidden_states, shifted_self_mask)
+        attention_output = self.attention(hidden_states, shifted_self_mask, clip_feats)
         intermediate_output = self.hidden_intermediate(attention_output)
 
         return intermediate_output
@@ -414,7 +414,7 @@ class EncoderWoMemory(nn.Module):
             [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
         )
 
-    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True):
+    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
         """
         Args:
             prev_ms: [(N, M, D), ] * num_hidden_layers or None at first step.
@@ -427,7 +427,7 @@ class EncoderWoMemory(nn.Module):
         """
         all_encoder_layers = []
         for layer_idx, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, attention_mask)
+            hidden_states = layer_module(hidden_states, attention_mask, clip_feats)
             if output_all_encoded_layers:
                 all_encoder_layers.append(hidden_states)
         if not output_all_encoded_layers:
@@ -511,11 +511,12 @@ class TimeSeriesEncoder(nn.Module):
         self.ff = TrmFeedForward(self.cfg)
         self.layernorm = nn.LayerNorm((384))
 
-    def forward(self, x):
+    def forward(self, x, res):
         x = self.pe(x)
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, x)
+        x = x + res
         x = self.layernorm(x)
         return x
 
@@ -659,12 +660,13 @@ class LMPredictionHead(nn.Module):
 
 
 class TimeSeriesMoudule(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, num_layers=2):
         super().__init__()
         self.cfg = cfg
         self.cfg.hidden_size = 384
         self.hidden_size = 768
-        self.TSEncoder = TimeSeriesEncoder(self.cfg)
+        self.TSlayers =\
+            nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
         self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         # self.conv = nn.Conv1d(3, 1, 1)
@@ -673,7 +675,9 @@ class TimeSeriesMoudule(nn.Module):
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
-        ts_feats = self.TSEncoder(ts_feats)
+        # ts_feats = self.TSEncoder(ts_feats)
+        for layer in self.TSlayers:
+            ts_feats = layer(ts_feats, ts_feats)
         ts_feats = self.expand(ts_feats)
         # ts_feats = self.conv(ts_feats)
         ts_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
@@ -779,11 +783,8 @@ class RecursiveTransformer(nn.Module):
         # clip_his = torch.zeros((embeddings.shape)).cuda()
         # clip_his = clip_his + ts_feats
         encoded_layer_outputs = self.encoder(
-            embeddings, input_masks, output_all_encoded_layers=False
+            embeddings, input_masks, output_all_encoded_layers=False, clip_feats=clip_feats
         )  # both outputs are list
-        # decoded_layer_outputs = self.transformerdecoder(
-        #     encoded_layer_outputs[-1], input_masks, clip_his
-        # )
         decoded_layer_outputs = self.transformerdecoder(
             encoded_layer_outputs[-1], input_masks, clip_feats
         )
