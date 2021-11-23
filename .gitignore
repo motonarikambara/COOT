@@ -10,6 +10,11 @@
 /annotations/
 /wandb/
 /error_analysis/
+/ponnet_data/*.mp4
+/ponnet_data/__pycache__/
+/ponnet_data/s3d*
+/ponnet_data/S3D*/
+
 
 # ---------- general
 
