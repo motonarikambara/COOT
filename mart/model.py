@@ -506,18 +506,21 @@ class TimeSeriesEncoder(nn.Module):
     def __init__(self, cfg, num_layers=2):
         super().__init__()
         self.cfg = cfg
-        self.pe = PositionEncoding(n_filters=384)
-        self.layers = nn.ModuleList([TrmEncLayer(self.cfg) for _ in range(num_layers)])
+        self.pe = PositionEncoding(n_filters=cfg.hidden_size)
+        self.layers = nn.ModuleList(
+            [TrmEncLayer(cfg) for _ in range(num_layers)]
+        )
         self.ff = TrmFeedForward(self.cfg)
-        self.layernorm = nn.LayerNorm((384))
+        self.layernorm = nn.LayerNorm((cfg.hidden_size))
 
-    def forward(self, x, res):
+    def forward(self, x):
         x = self.pe(x)
+        res = x.clone()
         for layer in self.layers:
             x = layer(x)
-        x = self.ff(x, x)
-        x = x + res
-        x = self.layernorm(x)
+        x = self.ff(x, res)
+        # x = x + res
+        # x = self.layernorm(x)
         return x
 
 
@@ -567,6 +570,8 @@ class EmbeddingsWithVideo(nn.Module):
         self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
+        self.TSModule = TimeSeriesMoudule(cfg)
+
     def set_pretrained_embedding(self, pretrained_embedding, freeze=True):
         """
         Note the from_pretrained does not work in-place, so you need to assign value to the embedding
@@ -591,6 +596,7 @@ class EmbeddingsWithVideo(nn.Module):
         """
         words_embeddings = self.word_fc(self.word_embeddings(input_ids))
         video_embeddings = self.video_embeddings(video_features)
+
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
         words_embeddings += token_type_embeddings
@@ -667,7 +673,7 @@ class TimeSeriesMoudule(nn.Module):
         self.hidden_size = 768
         self.TSlayers =\
             nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
-        self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
+        # self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         # self.conv = nn.Conv1d(3, 1, 1)
         self.layernorm = nn.LayerNorm(self.hidden_size)
@@ -677,7 +683,9 @@ class TimeSeriesMoudule(nn.Module):
         ts_feats = x.clone().cuda()
         # ts_feats = self.TSEncoder(ts_feats)
         for layer in self.TSlayers:
-            ts_feats = layer(ts_feats, ts_feats)
+            ts_feats = layer(ts_feats)
+        # ts_feats = self.expand(ts_feats)
+        ts_feats = ts_feats + x
         ts_feats = self.expand(ts_feats)
         # ts_feats = self.conv(ts_feats)
         ts_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
@@ -754,23 +762,26 @@ class RecursiveTransformer(nn.Module):
         self.future_rec = []
         self.future_gt = []
         # preprocess
+        vid_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
-        clip_feats[:, 1:3, :] = video_features[:, 1:3, :].clone()
+        clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
-        future_b = torch.zeros(video_features[:, 3, :].shape)
-        future_b = video_features[:, 3, :].clone()
+        future_b = torch.zeros(video_features[:, 2, :].shape)
+        future_b = video_features[:, 2, :].clone()
         future_b = self.pred_f(future_b)
         tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
+        vid_feats[:, 2, :] = tmp_feat_f
         clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
 
         past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
         tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
         past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
 
-        clip_feats = self.ff(clip_feats)
+        # clip_feats = self.ff(clip_feats)
         # clip_feats[:, 2, :] = pred_future.clone()
-        clip_feats = clip_feats.cuda()
+        video_features[:, 1:4, :] = vid_feats.clone()
 
         # Time Series Module
         _, clip_feats = self.TSModule(clip_feats)
