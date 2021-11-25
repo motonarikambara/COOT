@@ -461,7 +461,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=5):
+    def __init__(self, cfg, num_hidden_layers=2):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -503,7 +503,7 @@ class TrmEncLayer(nn.Module):
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=2):
+    def __init__(self, cfg, num_layers=3):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=cfg.hidden_size)
@@ -666,34 +666,51 @@ class LMPredictionHead(nn.Module):
 
 
 class TimeSeriesMoudule(nn.Module):
-    def __init__(self, cfg, num_layers=2):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         self.cfg.hidden_size = 384
         self.hidden_size = 768
-        self.TSlayers =\
-            nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
+        # self.TSlayers =\
+        #     nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
         # self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
+        self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         # self.conv = nn.Conv1d(3, 1, 1)
         self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
+        self.z = torch.randn(1, requires_grad=True).cuda()
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
-        # ts_feats = self.TSEncoder(ts_feats)
-        for layer in self.TSlayers:
-            ts_feats = layer(ts_feats)
+        ts_feats = self.TSEncoder(ts_feats)
+        # for layer in self.TSlayers:
+        #     ts_feats = layer(ts_feats)
         # ts_feats = self.expand(ts_feats)
-        ts_feats = ts_feats + x
+        ts_feats = self.z * ts_feats + (1 - self.z) * x
         ts_feats = self.expand(ts_feats)
         # ts_feats = self.conv(ts_feats)
-        ts_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
-        ts_feats = self.layernorm(ts_feats)
+        tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
+        tmp_feats = self.layernorm(tmp_feats)
         # x = x + ts_feats
         # x = self.dense(x)
         # x = self.layernorm(x)
-        return x, ts_feats
+        return ts_feats, tmp_feats
+
+
+class AttentionBranchNetwork(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.sigmoid = nn.Sigmoid()
+        self.z = torch.randn(1, requires_grad=True).cuda()
+
+    def forward(self, att, feat):
+        att = self.sigmoid(att)
+        att = torch.mul(att, feat)
+        att = att + feat
+        att = self.z * att + (1 - self.z) * feat
+        return att[:, 1, :].reshape((-1, 1, self.cfg.hidden_size))
 
 
 # MART model
@@ -712,7 +729,9 @@ class RecursiveTransformer(nn.Module):
             else None
         )
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
-        self.transformerdecoder = Decoder(cfg)
+        self.transformerdecoder_1 = Decoder(cfg)
+        self.transformerdecoder_2 = Decoder(cfg)
+        self.transformerdecoder_3 = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(
                 cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
@@ -732,9 +751,9 @@ class RecursiveTransformer(nn.Module):
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
             nn.ReLU(),
-            nn.Linear(input_size, input_size),
-            nn.Dropout(0.2),
+            nn.Linear(input_size, input_size)
         )
+        self.abn = AttentionBranchNetwork(cfg)
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
@@ -784,7 +803,9 @@ class RecursiveTransformer(nn.Module):
         video_features[:, 1:4, :] = vid_feats.clone()
 
         # Time Series Module
-        _, clip_feats = self.TSModule(clip_feats)
+        ts_feats, ts_feat = self.TSModule(clip_feats)
+        abn_att = torch.zeros(ts_feats.shape).cuda()
+        abn_att = abn_att + ts_feat
         # ts_feats.view((-1, 1, self.cfg.hidden_size))
         # video_features[:, 1:4, :] = clip_feats
 
@@ -794,10 +815,18 @@ class RecursiveTransformer(nn.Module):
         # clip_his = torch.zeros((embeddings.shape)).cuda()
         # clip_his = clip_his + ts_feats
         encoded_layer_outputs = self.encoder(
-            embeddings, input_masks, output_all_encoded_layers=False, clip_feats=clip_feats
+            embeddings, input_masks, output_all_encoded_layers=False
         )  # both outputs are list
-        decoded_layer_outputs = self.transformerdecoder(
-            encoded_layer_outputs[-1], input_masks, clip_feats
+        decoded_layer_outputs = self.transformerdecoder_1(
+            encoded_layer_outputs[-1], input_masks, ts_feat
+        )
+        ts_feat = self.abn(abn_att, ts_feats)
+        decoded_layer_outputs = self.transformerdecoder_2(
+            decoded_layer_outputs[-1], input_masks, ts_feat
+        )
+        ts_feat = self.abn(abn_att, ts_feats)
+        decoded_layer_outputs = self.transformerdecoder_3(
+            decoded_layer_outputs[-1], input_masks, ts_feat
         )
         prediction_scores = self.decoder(
             decoded_layer_outputs[-1]
