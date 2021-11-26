@@ -157,7 +157,7 @@ class SelfAttention(nn.Module):
     Attentionの計算
     """
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, m=25):
         super().__init__()
         if cfg.hidden_size % cfg.num_attention_heads != 0:
             raise ValueError(
@@ -215,9 +215,11 @@ class SelfAttention(nn.Module):
             att_w = att_w + attention_mask
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(att_w)
+        attention_probs = self.dropout(attention_probs)
+
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
+        # attention_probs = self.dropout(attention_probs)
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -248,14 +250,14 @@ class Attention(nn.Module):
     TransformerにおけるMHA
     """
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, m=25):
         super().__init__()
-        self.self = SelfAttention(cfg)
+        self.self = SelfAttention(cfg, m)
         self.output = SelfOutput(cfg)
 
     def forward(self, x, attention_mask=None, clip_his=None):
         """
-        Args:
+   いつの間にか取られてた、、、😢  Args:
             input_tensor: (N, L, D)
             attention_mask: (N, Lq, L)
         Returns:
@@ -461,7 +463,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=2):
+    def __init__(self, cfg, num_hidden_layers=3):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -488,7 +490,7 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = Attention(cfg)
+        self.attention = Attention(cfg, m=3)
         self.output = TrmFeedForward(cfg)
 
     def forward(self, x):
@@ -665,6 +667,40 @@ class LMPredictionHead(nn.Module):
         return hidden_states  # (N, L, vocab_size)
 
 
+class RelationalSelfAttention(nn.Module):
+    def __init__(self, cfg, m=3):
+        super().__init__()
+        self.cfg = cfg
+        self.query_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.key_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.value_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)      
+        self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.g = nn.Linear(m, cfg.hidden_size)
+        self.rc = nn.Linear(m, self.attention_head_size)
+
+    def forward(self, target, context):
+        query = self.query_layer(target)
+        key = self.key_layer(context)
+        value = self.value_layer(context)
+
+        # basic kernel
+        kernel_v = self.p(query)
+
+        # relational kernel
+        x_q = torch.mul(query, key)
+        kernel_r = self.h(x_q)
+
+        # basic context
+        # basic_cont = context.clone()
+        
+        # relational context
+        xg = value.clone()
+        xg = torch.t(xg)
+        xg = self.g(xg)
+
+
+
 class TimeSeriesMoudule(nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -731,7 +767,7 @@ class RecursiveTransformer(nn.Module):
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
         self.transformerdecoder_1 = Decoder(cfg)
         self.transformerdecoder_2 = Decoder(cfg)
-        self.transformerdecoder_3 = Decoder(cfg)
+        # self.transformerdecoder_3 = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(
                 cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
@@ -824,10 +860,11 @@ class RecursiveTransformer(nn.Module):
         decoded_layer_outputs = self.transformerdecoder_2(
             decoded_layer_outputs[-1], input_masks, ts_feat
         )
-        ts_feat = self.abn(abn_att, ts_feats)
-        decoded_layer_outputs = self.transformerdecoder_3(
-            decoded_layer_outputs[-1], input_masks, ts_feat
-        )
+        # ts_feat = self.abn(abn_att, ts_feats)
+        # decoded_layer_outputs = self.transformerdecoder_3(
+        #     decoded_layer_outputs[-1], input_masks, ts_feat
+        # )
+
         prediction_scores = self.decoder(
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
