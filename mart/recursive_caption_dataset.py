@@ -177,60 +177,59 @@ class RecursiveCaptionDataset(data.Dataset):
         # ---------- Load video data ----------
 
         # Decide whether to load COOT embeddings or video features
-        if self.coot_model_name is not None:
-            # COOT embeddings
-            self.data_type = DataTypesConstCaption.COOT_EMB
+        # COOT embeddings
+        self.data_type = DataTypesConstCaption.COOT_EMB
 
-            # for activitynet, coot val split contains both ae-val and ae-test splits
-            coot_dataset_mode = "val" if self.mode == "test" else self.mode
+        # for activitynet, coot val split contains both ae-val and ae-test splits
+        coot_dataset_mode = "val" if self.mode == "test" else self.mode
 
-            self.coot_emb_h5_file = (
-                self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
-            )
-            assert (
-                self.coot_emb_h5_file.is_file()
-            ), f"Coot embeddings file not found: {self.coot_emb_h5_file}"
+        self.coot_emb_h5_file = (
+            self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
+        )
+        assert (
+            self.coot_emb_h5_file.is_file()
+        ), f"Coot embeddings file not found: {self.coot_emb_h5_file}"
 
-            # load coot embeddings data
-            data_file = h5py.File(self.coot_emb_h5_file, "r")
+        # load coot embeddings data
+        data_file = h5py.File(self.coot_emb_h5_file, "r")
 
-            if "key" not in data_file:
-                # backwards compatible to old h5+json embeddings
-                vtdata = json.load(
-                    (self.coot_feat_dir / f"{self.coot_model_name}_{mode}.json").open(
-                        "rt", encoding="utf8"
-                    )
+        if "key" not in data_file:
+            # backwards compatible to old h5+json embeddings
+            vtdata = json.load(
+                (self.coot_feat_dir / f"{self.coot_model_name}_{mode}.json").open(
+                    "rt", encoding="utf8"
                 )
-                clip_nums = vtdata["clip_nums"]
-                vid_ids = vtdata["vid_ids"]
-                clip_ids = vtdata["clip_ids"]
-            else:
-                # new version, everything in the h5
-                # decode video ids from byte to utf8
-                # for note PC
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                # for desktop
-                vid_ids = [key for key in data_file["key"]]
+            )
+            clip_nums = vtdata["clip_nums"]
+            vid_ids = vtdata["vid_ids"]
+            clip_ids = vtdata["clip_ids"]
+        else:
+            # new version, everything in the h5
+            # decode video ids from byte to utf8
+            # for note PC
+            vid_ids = [key.decode("utf8") for key in data_file["key"]]
+            # for desktop
+            # vid_ids = [key for key in data_file["key"]]
 
-                # load clip information
-                clip_nums = data_file["clip_num"]
-                clip_ids = []
-                assert len(vid_ids) == len(clip_nums)
-                for vid_id, clip_num in zip(vid_ids, clip_nums):
-                    for c in range(clip_num):
-                        clip_ids.append((vid_id, c))
-            self.coot_clip_nums = np.array(clip_nums)
-            # map video id to video number
-            self.coot_vid_id_to_vid_number = {}
-            for i, vid_id in enumerate(vid_ids):
-                self.coot_vid_id_to_vid_number[vid_id] = i
+            # load clip information
+            clip_nums = data_file["clip_num"]
+            clip_ids = []
+            assert len(vid_ids) == len(clip_nums)
+            for vid_id, clip_num in zip(vid_ids, clip_nums):
+                for c in range(clip_num):
+                    clip_ids.append((vid_id, c))
+        self.coot_clip_nums = np.array(clip_nums)
+        # map video id to video number
+        self.coot_vid_id_to_vid_number = {}
+        for i, vid_id in enumerate(vid_ids):
+            self.coot_vid_id_to_vid_number[vid_id] = i
 
-            # map video id and clip id to clip number
-            self.coot_idx_to_clip_number = {}
-            for i, (vid_id, clip_id) in enumerate(clip_ids):
-                self.coot_idx_to_clip_number[f"{vid_id}/{clip_id}"] = i
+        # map video id and clip id to clip number
+        self.coot_idx_to_clip_number = {}
+        for i, (vid_id, clip_id) in enumerate(clip_ids):
+            self.coot_idx_to_clip_number[f"{vid_id}/{clip_id}"] = i
 
-            self.frame_to_second = None  # Don't need this for COOT embeddings
+        self.frame_to_second = None  # Don't need this for COOT embeddings
 
         print(
             f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}"
@@ -382,15 +381,11 @@ class RecursiveCaptionDataset(data.Dataset):
         }
         """
         raw_name = example["name"]
-        if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
-            # default video features from MART paper
-            video_feature = self._load_mart_video_feature(raw_name)
-        else:
-            # ver. future
-            clip_feats, past_feats, future_feats = self._load_coot_video_feature(
-                raw_name
-            )
-            video_feature = clip_feats
+        # ver. future
+        clip_feats, past_feats, future_feats = self._load_coot_video_feature(
+            raw_name
+        )
+        video_feature = clip_feats
 
         # recurrent
         num_sen = len(example["sentences"])
@@ -511,15 +506,7 @@ class RecursiveCaptionDataset(data.Dataset):
 
         future = np.zeros((max_v_l, self.coot_dim_clip))
         future[valid_l] = future_feat
-
-        # future = np.zeros((max_v_l, self.coot_dim_clip))
-        # future[valid_l] = future_feat
         valid_l += 1
-        # print("CLIP")
-
-        assert valid_l == max_v_l, f"valid {valid_l} max {max_v_l}"
-        # return feat, valid_l
-        # future
         return feat, valid_l, past, future
 
     # future
@@ -612,61 +599,46 @@ class RecursiveCaptionDataset(data.Dataset):
             batch:
         Returns:
         """
-        if self.recurrent:
-            # recurrent collate function. original docstring:
-            # HOW to batch clip-sentence pair? 1) directly copy the last
-            # sentence, but do not count them in when
-            # back-prop OR put all -1 to their text token label, treat
-
-            # collect meta
-            raw_batch_meta = [e[1] for e in batch]
-            batch_meta = []
-            for e in raw_batch_meta:
-                cur_meta = dict(name=None, timestamp=[], gt_sentence=[])
-                for d in e:
-                    cur_meta["name"] = d["name"]
-                    cur_meta["timestamp"].append(d["timestamp"])
-                    cur_meta["gt_sentence"].append(d["sentence"])
-                batch_meta.append(cur_meta)
-
-            batch = [e[0] for e in batch]
-            # Step1: pad each example to max_n_sen
-            max_n_sen = max([len(e) for e in batch])
-            raw_step_sizes = []
-
-            padded_batch = []
-            padding_clip_sen_data = copy.deepcopy(
-                batch[0][0]
-            )  # doesn"t matter which one is used
-            padding_clip_sen_data["input_labels"][:] = RecursiveCaptionDataset.IGNORE
-            for ele in batch:
-                cur_n_sen = len(ele)
-                if cur_n_sen < max_n_sen:
-                    # noinspection PyAugmentAssignment
-                    ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
-                raw_step_sizes.append(cur_n_sen)
-                padded_batch.append(ele)
-
-            # Step2: batching each steps individually in the batches
-            collated_step_batch = []
-            for step_idx in range(max_n_sen):
-                collated_step = step_collate([e[step_idx] for e in padded_batch])
-                collated_step_batch.append(collated_step)
-            return collated_step_batch, raw_step_sizes, batch_meta
-
-        # single sentences / untied
+        # recurrent collate function. original docstring:
+        # HOW to batch clip-sentence pair? 1) directly copy the last
+        # sentence, but do not count them in when
+        # back-prop OR put all -1 to their text token label, treat
 
         # collect meta
-        batch_meta = [
-            {
-                "name": e[1]["name"],
-                "timestamp": e[1]["timestamp"],
-                "gt_sentence": e[1]["sentence"],
-            }
-            for e in batch
-        ]  # change key
-        padded_batch = step_collate([e[0] for e in batch])
-        return padded_batch, None, batch_meta
+        raw_batch_meta = [e[1] for e in batch]
+        batch_meta = []
+        for e in raw_batch_meta:
+            cur_meta = dict(name=None, timestamp=[], gt_sentence=[])
+            for d in e:
+                cur_meta["name"] = d["name"]
+                cur_meta["timestamp"].append(d["timestamp"])
+                cur_meta["gt_sentence"].append(d["sentence"])
+            batch_meta.append(cur_meta)
+
+        batch = [e[0] for e in batch]
+        # Step1: pad each example to max_n_sen
+        max_n_sen = max([len(e) for e in batch])
+        raw_step_sizes = []
+
+        padded_batch = []
+        padding_clip_sen_data = copy.deepcopy(
+            batch[0][0]
+        )  # doesn"t matter which one is used
+        padding_clip_sen_data["input_labels"][:] = RecursiveCaptionDataset.IGNORE
+        for ele in batch:
+            cur_n_sen = len(ele)
+            if cur_n_sen < max_n_sen:
+                # noinspection PyAugmentAssignment
+                ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
+            raw_step_sizes.append(cur_n_sen)
+            padded_batch.append(ele)
+
+        # Step2: batching each steps individually in the batches
+        collated_step_batch = []
+        for step_idx in range(max_n_sen):
+            collated_step = step_collate([e[step_idx] for e in padded_batch])
+            collated_step_batch.append(collated_step)
+        return collated_step_batch, raw_step_sizes, batch_meta
 
 
 def prepare_batch_inputs(batch, use_cuda: bool, non_blocking=False):
