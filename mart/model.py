@@ -257,7 +257,7 @@ class Attention(nn.Module):
 
     def forward(self, x, attention_mask=None, clip_his=None):
         """
-   いつの間にか取られてた、、、😢  Args:
+        Args:
             input_tensor: (N, L, D)
             attention_mask: (N, Lq, L)
         Returns:
@@ -677,7 +677,7 @@ class RelationalSelfAttention(nn.Module):
         self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.g = nn.Linear(m, cfg.hidden_size)
-        self.rc = nn.Linear(m, self.attention_head_size)
+        self.context_hidden_change = nn.Linear(m, cfg.hidden_size)
 
     def forward(self, target, context):
         query = self.query_layer(target)
@@ -690,6 +690,7 @@ class RelationalSelfAttention(nn.Module):
         # relational kernel
         x_q = torch.mul(query, key)
         kernel_r = self.h(x_q)
+        kernel = kernel_v + kernel_r
 
         # basic context
         # basic_cont = context.clone()
@@ -698,6 +699,15 @@ class RelationalSelfAttention(nn.Module):
         xg = value.clone()
         xg = torch.t(xg)
         xg = self.g(xg)
+        x_nr = torch.matmul(value, xg)
+        context = x_nr + value
+
+        # fusion
+        context = torch.t(context)
+        context = self.context_hidden_change(context)
+        output = torch.matmul(kernel, context)
+
+        return output
 
 
 
