@@ -668,6 +668,10 @@ class LMPredictionHead(nn.Module):
 
 
 class RelationalSelfAttention(nn.Module):
+    """
+    Relational self-attention (RSA)
+    https://arxiv.org/pdf/2111.01673.pdf
+    """
     def __init__(self, cfg, m=3):
         super().__init__()
         self.cfg = cfg
