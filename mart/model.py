@@ -465,12 +465,12 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, cfg, num_hidden_layers=3):
         super().__init__()
-        # self.layer = nn.ModuleList(
-        #     [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
-        # )
         self.layer = nn.ModuleList(
-            [RelationalSelfAttention(cfg) for _ in range(num_hidden_layers)]
+            [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
         )
+        # self.layer = nn.ModuleList(
+        #     [RelationalSelfAttention(cfg) for _ in range(num_hidden_layers)]
+        # )
 
     def forward(self, hidden_states, attention_mask, clip_his):
         """
@@ -485,12 +485,11 @@ class Decoder(nn.Module):
         query_clip = query_clip + clip_his
         all_decoder_layers = []
         for layer_idx, layer_module in enumerate(self.layer):
-            # hidden_states =\
-            #     layer_module(hidden_states, attention_mask, clip_his)
             hidden_states =\
-                layer_module(hidden_states, query_clip)
-            # all_decoder_layers.append(hidden_states)
-            all_decoder_layers.append(query_clip)
+                layer_module(hidden_states, attention_mask, clip_his)
+            # hidden_states =\
+            #     layer_module(hidden_states, query_clip)
+            all_decoder_layers.append(hidden_states)
         return all_decoder_layers
 
 
@@ -498,7 +497,8 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = Attention(cfg, m=3)
+        # self.attention = Attention(cfg, m=3)
+        self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
 
     def forward(self, x):
@@ -507,7 +507,10 @@ class TrmEncLayer(nn.Module):
             x: (N, L, D)
         Returns:
         """
-        x = self.attention(x)
+        tmp_x = x.clone()
+        target = x[:, 1, :].clone()
+        target = self.attention(target, tmp_x)
+        x[:, 1, :] = target.clone()
         x = self.output(x, x)  # (N, L, D)
         return x
 
@@ -680,28 +683,37 @@ class RelationalSelfAttention(nn.Module):
     Relational self-attention (RSA)
     https://arxiv.org/pdf/2111.01673.pdf
     """
-    def __init__(self, cfg, m=25):
+    def __init__(self, cfg, m=3):
         super().__init__()
         self.cfg = cfg
-        self.query_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.key_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.value_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)      
-        self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.g = nn.Linear(m, cfg.hidden_size)
-        self.context_hidden_change = nn.Linear(m, cfg.hidden_size)
+        self.m = m
+        self.hidden_size = 384
+        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        # self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.h =\
+            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+        # self.g = nn.Linear(m, cfg.hidden_size)
+        self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        # self.context_hidden_change = nn.Linear(m, cfg.hidden_size)
+        self.one = torch.ones((m, 1)).cuda()
 
-    def forward(self, target, context):
-        query = self.query_layer(target)
-        key = self.key_layer(context)
-        value = self.value_layer(context)
+    def forward(self, target, cont):
+        query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+        key = self.key_layer(cont)
+        value = self.value_layer(cont)
 
         # basic kernel
-        kernel_v = self.p(query)
+        kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
 
         # relational kernel
-        x_q = torch.mul(query, key)
-        kernel_r = self.h(x_q)
+        q = torch.matmul(self.one, torch.transpose(query, 1, 2))
+        x_q = torch.mul(q, key)
+        x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
+        kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
         kernel = kernel_v + kernel_r
 
         # basic context
@@ -710,14 +722,16 @@ class RelationalSelfAttention(nn.Module):
         # relational context
         xg = value.clone()
         xg = torch.transpose(xg, 1, 2)
-        xg = self.g(xg)
-        x_nr = torch.matmul(value, xg)
+        _xg = torch.matmul(xg, self.g)
+        x_nr = torch.matmul(value, _xg)
         context = x_nr + value
 
         # fusion
-        context = torch.transpose(context, 1, 2)
-        context = self.context_hidden_change(context)
-        output = torch.matmul(kernel, context)
+        # context = torch.transpose(context, 1, 2)
+        # context = self.context_hidden_change(context)
+        # print(kernel.shape)
+        # print(context.shape)
+        output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
 
         return output
 
