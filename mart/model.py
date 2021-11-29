@@ -465,8 +465,11 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, cfg, num_hidden_layers=3):
         super().__init__()
+        # self.layer = nn.ModuleList(
+        #     [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
+        # )
         self.layer = nn.ModuleList(
-            [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
+            [RelationalSelfAttention(cfg) for _ in range(num_hidden_layers)]
         )
 
     def forward(self, hidden_states, attention_mask, clip_his):
@@ -478,11 +481,16 @@ class Decoder(nn.Module):
 
         Returns:
         """
+        query_clip = torch.zeros(hidden_states.shape).cuda()
+        query_clip = query_clip + clip_his
         all_decoder_layers = []
         for layer_idx, layer_module in enumerate(self.layer):
+            # hidden_states =\
+            #     layer_module(hidden_states, attention_mask, clip_his)
             hidden_states =\
-                layer_module(hidden_states, attention_mask, clip_his)
-            all_decoder_layers.append(hidden_states)
+                layer_module(hidden_states, query_clip)
+            # all_decoder_layers.append(hidden_states)
+            all_decoder_layers.append(query_clip)
         return all_decoder_layers
 
 
@@ -672,7 +680,7 @@ class RelationalSelfAttention(nn.Module):
     Relational self-attention (RSA)
     https://arxiv.org/pdf/2111.01673.pdf
     """
-    def __init__(self, cfg, m=3):
+    def __init__(self, cfg, m=25):
         super().__init__()
         self.cfg = cfg
         self.query_layer = nn.Linear(cfg.hidden_size, cfg.hidden_size)
@@ -701,18 +709,17 @@ class RelationalSelfAttention(nn.Module):
         
         # relational context
         xg = value.clone()
-        xg = torch.t(xg)
+        xg = torch.transpose(xg, 1, 2)
         xg = self.g(xg)
         x_nr = torch.matmul(value, xg)
         context = x_nr + value
 
         # fusion
-        context = torch.t(context)
+        context = torch.transpose(context, 1, 2)
         context = self.context_hidden_change(context)
         output = torch.matmul(kernel, context)
 
         return output
-
 
 
 class TimeSeriesMoudule(nn.Module):
