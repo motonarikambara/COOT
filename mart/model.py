@@ -18,7 +18,6 @@ from mart.masked_transformer import MTransformer
 from mart.loss_caption import LabelSmoothingLoss
 from nntrainer.utils_torch import count_parameters
 
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -463,7 +462,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=3):
+    def __init__(self, cfg, num_hidden_layers=5):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -758,7 +757,7 @@ class TimeSeriesMoudule(nn.Module):
         # for layer in self.TSlayers:
         #     ts_feats = layer(ts_feats)
         # ts_feats = self.expand(ts_feats)
-        ts_feats = self.z * ts_feats + (1 - self.z) * x
+        ts_feats = self.z * x + (1 - self.z) * ts_feats
         ts_feats = self.expand(ts_feats)
         # ts_feats = self.conv(ts_feats)
         tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
@@ -800,9 +799,9 @@ class RecursiveTransformer(nn.Module):
             else None
         )
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
-        self.transformerdecoder_1 = Decoder(cfg)
-        self.transformerdecoder_2 = Decoder(cfg)
-        # self.transformerdecoder_3 = Decoder(cfg)
+        self.transformerdecoder = Decoder(cfg)
+        # self.transformerdecoder_2 = Decoder(cfg)
+        # # self.transformerdecoder_3 = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(
                 cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
@@ -824,7 +823,7 @@ class RecursiveTransformer(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size, input_size)
         )
-        self.abn = AttentionBranchNetwork(cfg)
+        # self.abn = AttentionBranchNetwork(cfg)
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
@@ -875,8 +874,8 @@ class RecursiveTransformer(nn.Module):
 
         # Time Series Module
         ts_feats, ts_feat = self.TSModule(clip_feats)
-        abn_att = torch.zeros(ts_feats.shape).cuda()
-        abn_att = abn_att + ts_feat
+        # abn_att = torch.zeros(ts_feats.shape).cuda()
+        # abn_att = abn_att + ts_feat
         # ts_feats.view((-1, 1, self.cfg.hidden_size))
         # video_features[:, 1:4, :] = clip_feats
 
@@ -888,13 +887,13 @@ class RecursiveTransformer(nn.Module):
         encoded_layer_outputs = self.encoder(
             embeddings, input_masks, output_all_encoded_layers=False
         )  # both outputs are list
-        decoded_layer_outputs = self.transformerdecoder_1(
+        decoded_layer_outputs = self.transformerdecoder(
             encoded_layer_outputs[-1], input_masks, ts_feat
         )
-        ts_feat = self.abn(abn_att, ts_feats)
-        decoded_layer_outputs = self.transformerdecoder_2(
-            decoded_layer_outputs[-1], input_masks, ts_feat
-        )
+        # ts_feat = self.abn(abn_att, ts_feats)
+        # decoded_layer_outputs = self.transformerdecoder_2(
+        #     decoded_layer_outputs[-1], input_masks, ts_feat
+        # )
         # ts_feat = self.abn(abn_att, ts_feats)
         # decoded_layer_outputs = self.transformerdecoder_3(
         #     decoded_layer_outputs[-1], input_masks, ts_feat
