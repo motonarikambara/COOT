@@ -18,7 +18,6 @@ GITLIKE_SUPPORT_FILE = "Supports .gitignore-like patterns, one per line."
 def add_exp_group_arg(parser: argparse.ArgumentParser) -> None:
     """
     Add experiment directory argument.
-
     Args:
         parser: Command line argument parser.
     """
@@ -31,7 +30,6 @@ def add_exp_group_arg(parser: argparse.ArgumentParser) -> None:
 def add_exp_identifier_args(parser: argparse.ArgumentParser) -> None:
     """
     Add full single experiment run identification arguments (dir, name, run name).
-
     Args:
         parser: Command line argument parser.
     """
@@ -45,7 +43,6 @@ def add_trainer_args(parser: argparse.ArgumentParser, *, dataset_path: bool = Tr
                      profiling_path: bool = False) -> None:
     """
     Add various arguments for experiment running.
-
     Args:
         parser: Command line argument parser.
         dataset_path: Whether to add dataset path argument.
@@ -55,6 +52,8 @@ def add_trainer_args(parser: argparse.ArgumentParser, *, dataset_path: bool = Tr
     parser.add_argument("-o", "--config", type=str, default=None,
                         help="Modify the loaded YAML config. E.g. to change the number of dataloader workers "
                              "and the batchsize, use '-c dataloader.num_workers=20;train.batch_size=32'")
+    parser.add_argument("--bs", "--batch_size", dest="batch_size", type=int, default=16, help="batch size")
+    parser.add_argument("-ls", "--label_smoothing", dest="label_smoothing", type=float, default=0.1, help="label smoothing")
     parser.add_argument("--print_config", action="store_true", help="Print the experiment config.")
     # num workers
     parser.add_argument("--workers", type=int, default=None, help="Shortcut for setting dataloader workers.")
@@ -77,7 +76,6 @@ def add_trainer_args(parser: argparse.ArgumentParser, *, dataset_path: bool = Tr
 def add_dataset_path_arg(parser: argparse.ArgumentParser) -> None:
     """
     Add dataset path argument.
-
     Args:
         parser: Command line argument parser.
     """
@@ -87,7 +85,6 @@ def add_dataset_path_arg(parser: argparse.ArgumentParser) -> None:
 def add_default_args(parser) -> None:
     """
     Add some common script args: logging options -q, -v and test flag -t
-
     Args:
         parser: Command line argument parser.
     """
@@ -106,7 +103,6 @@ def add_default_args(parser) -> None:
 def add_test_arg(parser) -> None:
     """
     Test argument -t
-
     Args:
         parser: Command line argument parser.
     """
@@ -116,7 +112,6 @@ def add_test_arg(parser) -> None:
 def add_path_args(parser: argparse.ArgumentParser, *, dataset_path: bool = True, profiling_path: bool = False) -> None:
     """
     Add all arguments for customizing the paths.
-
     Args:
         parser: Command line argument parser.
         dataset_path: Whether to add dataset path argument.
@@ -135,7 +130,6 @@ def add_path_args(parser: argparse.ArgumentParser, *, dataset_path: bool = True,
 def add_dataset_test_arg(parser: argparse.ArgumentParser) -> None:
     """
     Add flag for testing the dataset.
-
     Args:
         parser: Command line argument parser.
     """
@@ -145,7 +139,6 @@ def add_dataset_test_arg(parser: argparse.ArgumentParser) -> None:
 def add_multi_experiment_args(parser: argparse.ArgumentParser) -> None:
     """
     Add arguments for working on multiple experiment groups.
-
     Args:
         parser: Command line argument parser.
     """
@@ -160,7 +153,6 @@ def add_multi_experiment_args(parser: argparse.ArgumentParser) -> None:
 def add_show_args(parser: argparse.ArgumentParser) -> None:
     """
     Add arguments for printing results.
-
     Args:
         parser: Command line argument parser.
     """
@@ -183,7 +175,6 @@ def add_show_args(parser: argparse.ArgumentParser) -> None:
 def _add_run_args(parser: argparse.ArgumentParser) -> None:
     """
     Add run number argument.
-
     Args:
         parser: Command line argument parser.
     """
@@ -196,7 +187,6 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
 def _add_gpu_args(parser: argparse.ArgumentParser) -> None:
     """
     Add arguments for gpu settings.
-
     Args:
         parser: Command line argument parser.
     """
@@ -210,20 +200,16 @@ def determine_multi_runs(exp_type: str, exp_group: str = "", exp_list: Optional[
                          config_dir=TrainerPathConst.DIR_CONFIG):
     """
     Given the experiment group and experiment list file, determine the experiments to run.
-
-
     Notes:
         If the list is empty, read all experiments from the folder determined by exp_group.
         If the list is not empty, each line can contain either:
             Only the experiment name, then the experiment: exp_group/exp_name will be loaded.
             Both experiment group and name then the list determines both.
-
     Args:
         exp_type: Experiment type.
         exp_group: Experiment group.
         exp_list: Experiment list.
         config_dir: Experiment configurations base directory.
-
     Returns:
         List of tuples with experiment group, experiment name.
     """
@@ -266,12 +252,10 @@ def determine_multi_runs(exp_type: str, exp_group: str = "", exp_list: Optional[
 def update_config_from_args(config: Dict, args: argparse.Namespace, *, verbose: bool = True) -> Dict[str, Any]:
     """
     Modify config and paths given script arguments.
-
     Args:
         config: Config dictionary.
         args: Arguments.
         verbose: Print message when updating the config.
-
     Returns:
         Updated config dict.
     """
@@ -340,10 +324,8 @@ def update_config_from_args(config: Dict, args: argparse.Namespace, *, verbose: 
 def update_path_from_args(args: argparse.Namespace) -> Path:
     """
     Either set path from args or from default.
-
     Args:
         args:
-
     Returns:
         Root path to data.
     """
@@ -354,11 +336,9 @@ def update_path_from_args(args: argparse.Namespace) -> Path:
 def setup_experiment_identifier_from_args(args: argparse.Namespace, exp_type: str) -> Tuple[str, str, str]:
     """
     Determine the experiment identifier (Group, name, config file) either from group and name or from config file path.
-
     Args:
         args: Arguments.
         exp_type: Experiment type.
-
     Returns:
         Tuple of group, name, config file.
     """
@@ -382,13 +362,11 @@ def setup_config_file_from_experiment_identifier(
         exp_type: str, exp_group: str, exp_name: str, *, config_dir: str = TrainerPathConst.DIR_CONFIG) -> Path:
     """
     Given the identifier parts, return Path to config yaml file.
-
     Args:
         exp_type: Experiment type
         exp_group: Experiment group
         exp_name: Experiment name
         config_dir: Config directory
-
     Returns:
         Path to config yaml.
     """
