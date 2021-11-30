@@ -337,55 +337,51 @@ class MartTrainer(trainer_base.BaseTrainer):
                 # ---------- forward pass ----------
                 self.optimizer.zero_grad()
                 with autocast(enabled=self.cfg.fp16_train):
-                    if self.cfg.recurrent:
                         # ---------- training step for recurrent models ----------
-                        batched_data = [
-                            prepare_batch_inputs(
-                                step_data,
-                                use_cuda=self.cfg.use_cuda,
-                                non_blocking=self.cfg.cuda_non_blocking,
-                            )
-                            for step_data in batch[0]
-                        ]
-
-                        input_ids_list = [e["input_ids"] for e in batched_data]
-                        video_features_list = [e["video_feature"] for e in batched_data]
-                        input_masks_list = [e["input_mask"] for e in batched_data]
-                        token_type_ids_list = [
-                            e["token_type_ids"] for e in batched_data
-                        ]
-                        input_labels_list = [e["input_labels"] for e in batched_data]
-                        # clips_feature = [e["clips_feature"] for e in batched_data]
-                        future_clip = [e["future_clips"] for e in batched_data]
-
-                        if self.cfg.debug:
-                            cur_data = batched_data[step]
-                            self.logger.info(
-                                "input_ids \n{}".format(cur_data["input_ids"][step])
-                            )
-                            self.logger.info(
-                                "input_mask \n{}".format(cur_data["input_mask"][step])
-                            )
-                            self.logger.info(
-                                "input_labels \n{}".format(
-                                    cur_data["input_labels"][step]
-                                )
-                            )
-                            self.logger.info(
-                                "token_type_ids \n{}".format(
-                                    cur_data["token_type_ids"][step]
-                                )
-                            )
-                        # ver. future
-                        loss, pred_scores_list = self.model(
-                            input_ids_list,
-                            video_features_list,
-                            input_masks_list,
-                            token_type_ids_list,
-                            input_labels_list,
-                            future_clip,
+                    batched_data = [
+                        prepare_batch_inputs(
+                            step_data,
+                            use_cuda=self.cfg.use_cuda,
+                            non_blocking=self.cfg.cuda_non_blocking,
                         )
-                        wandb.log({"train_loss": loss})
+                        for step_data in batch[0]
+                    ]
+
+                    input_ids_list = [e["input_ids"] for e in batched_data]
+                    video_features_list = [e["video_feature"] for e in batched_data]
+                    input_masks_list = [e["input_mask"] for e in batched_data]
+                    token_type_ids_list = [
+                        e["token_type_ids"] for e in batched_data
+                    ]
+                    input_labels_list = [e["input_labels"] for e in batched_data]
+
+                    if self.cfg.debug:
+                        cur_data = batched_data[step]
+                        self.logger.info(
+                            "input_ids \n{}".format(cur_data["input_ids"][step])
+                        )
+                        self.logger.info(
+                            "input_mask \n{}".format(cur_data["input_mask"][step])
+                        )
+                        self.logger.info(
+                            "input_labels \n{}".format(
+                                cur_data["input_labels"][step]
+                            )
+                        )
+                        self.logger.info(
+                            "token_type_ids \n{}".format(
+                                cur_data["token_type_ids"][step]
+                            )
+                        )
+                    # ver. future
+                    loss, pred_scores_list = self.model(
+                        input_ids_list,
+                        video_features_list,
+                        input_masks_list,
+                        token_type_ids_list,
+                        input_labels_list
+                    )
+                    wandb.log({"train_loss": loss})
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -541,7 +537,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                     input_masks_list = [e["input_mask"] for e in batched_data]
                     token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-                    future_clips = [e["future_clips"] for e in batched_data]
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
@@ -549,24 +544,16 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list,
                         token_type_ids_list,
                         input_labels_list,
-                        future_clips,
                     )
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
-                    # ver. origin
-                    # model_inputs = [
-                    #     [e["input_ids"] for e in batched_data],
-                    #     [e["video_feature"] for e in batched_data],
-                    #     [e["input_mask"] for e in batched_data],
-                    #     [e["token_type_ids"] for e in batched_data]]
 
                     model_inputs = [
                         [e["input_ids"] for e in batched_data],
                         [e["video_feature"] for e in batched_data],
                         [e["input_mask"] for e in batched_data],
                         [e["token_type_ids"] for e in batched_data],
-                        [e["future_clips"] for e in batched_data],
                     ]
                     dec_seq_list = self.translator.translate_batch(
                         model_inputs,
@@ -589,7 +576,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                                     ),
                                     # remove encoding
                                     # .encode("ascii", "ignore"),
-                                    "timestamp": cur_meta["timestamp"][step_idx],
                                     "gt_sentence": cur_meta["gt_sentence"][step_idx],
                                 }
                             )

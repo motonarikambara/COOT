@@ -66,6 +66,8 @@ def update_mart_config_from_args(
             print(
                 f"    Change config: Set dataset_(train|val).max_datapoints to {args.dataset_max}"
             )
+    config["train"]["batch_size"] = args.batch_size
+    config["label_smoothing"] = args.label_smoothing
     if args.preload:
         config["dataset_train"]["preload"] = True
         config["dataset_val"]["preload"] = True

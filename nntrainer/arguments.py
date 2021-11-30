@@ -55,6 +55,8 @@ def add_trainer_args(parser: argparse.ArgumentParser, *, dataset_path: bool = Tr
     parser.add_argument("-o", "--config", type=str, default=None,
                         help="Modify the loaded YAML config. E.g. to change the number of dataloader workers "
                              "and the batchsize, use '-c dataloader.num_workers=20;train.batch_size=32'")
+    parser.add_argument("--bs", "--batch_size", dest="batch_size", type=int, default=16, help="batch size")
+    parser.add_argument("-ls", "--label_smoothing", dest="label_smoothing", type=float, default=0.1, help="label smoothing")
     parser.add_argument("--print_config", action="store_true", help="Print the experiment config.")
     # num workers
     parser.add_argument("--workers", type=int, default=None, help="Shortcut for setting dataloader workers.")
