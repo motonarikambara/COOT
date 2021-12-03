@@ -22,6 +22,7 @@ save_mode: "best"
 use_beam: False
 beam_size: 2
 n_best: 1
+loss_weight: 0.1
 # generated sentence bounds
 min_sen_len: 5
 max_sen_len: 30

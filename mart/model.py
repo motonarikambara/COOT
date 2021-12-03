@@ -954,6 +954,7 @@ class RecursiveTransformer(nn.Module):
                 input_labels_list[idx].view(-1),
             )
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-            caption_loss += snt_loss + fut_loss
+            caption_loss +=\
+                0.9 * snt_loss + 0.1 * fut_loss
             # caption_loss += snt_loss
         return caption_loss, prediction_scores_list
