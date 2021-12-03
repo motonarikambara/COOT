@@ -31,6 +31,32 @@ class DataTypesConstCaption(ConstantHolder):
     COOT_EMB = "coot_emb"
 
 
+def make_dict(train_caption_file, word2idx_filepath):
+    sentence_dict = json.load(train_caption_file)
+    sentence_list = []
+    for sample in sentence_dict.values():
+        sentence_list.append(sample)
+    words = []
+    for sent in sentence_list:
+        word_list = nltk.tokenize.word_tokenize(sent)
+        words.extend(word_list)
+    
+    # default dict
+    word2idx_dict =\
+        {"[PAD]": 0, "[CLS]": 1, "[SEP]": 2, "[VID]": 3, "[BOS]": 4, "[EOS]": 5, "[UNK]": 6}
+    word_idx = 7
+    
+    # 辞書の作成
+    for word in words:
+        if word not in word2idx_dict:
+            word2idx_dict[word] = word_idx
+            word_idx += 1
+
+    # 辞書ファイルの作成
+    with open(word2idx_filepath, "w") as f:
+        json.dump(word2idx_dict, f, indent=0)
+
+
 class RecursiveCaptionDataset(data.Dataset):
     PAD_TOKEN = "[PAD]"  # padding of the whole sequence, note
     CLS_TOKEN = "[CLS]"  # leading token of the joint sequence
@@ -86,12 +112,6 @@ class RecursiveCaptionDataset(data.Dataset):
         duration_file = "captioning_video_feat_duration.csv"
         self.video_feature_dir = Path(video_feature_dir) / self.dset_name
         self.duration_file = self.annotations_dir / self.dset_name / duration_file
-        self.word2idx_file = (
-            self.annotations_dir / self.dset_name / "mart_word2idx.json"
-        )
-        self.word2idx = json.load(self.word2idx_file.open("rt", encoding="utf8"))
-        self.idx2word = {int(v): k for k, v in list(self.word2idx.items())}
-        print(f"WORD2IDX: {self.word2idx_file} len {len(self.word2idx)}")
 
         # Parameters for sequence lengths
         self.max_seq_len = max_v_len + max_t_len
@@ -123,14 +143,23 @@ class RecursiveCaptionDataset(data.Dataset):
                 f"Mode must be [train, val] for {self.dset_name}, got {mode}"
             )
 
+        self.word2idx_file = (
+            self.annotations_dir / self.dset_name / "ponnet_word2idx.json"
+        )
+        if not os.path.exists(self.word2idx_file):
+            self.word2idx_file = make_dict(data_path, self.word2idx_file)
+        self.word2idx = json.load(self.word2idx_file.open("rt", encoding="utf8"))
+        self.idx2word = {int(v): k for k, v in list(self.word2idx.items())}
+        print(f"WORD2IDX: {self.word2idx_file} len {len(self.word2idx)}")
+
         # load and process captions and video data
-        # clip_num, annnotation
+        # clip_id, sentence
         raw_data = json.load(data_path)
         coll_data = []
         for i, (k, line) in enumerate(tqdm(list(raw_data.items()))):
             if dataset_max is not None and i >= dataset_max > 0:
                 break
-            line["name"] = k
+            line["clip_id"] = k
             # line: annotation
             coll_data.append(line)
         self.data = coll_data
@@ -181,18 +210,19 @@ class RecursiveCaptionDataset(data.Dataset):
     def convert_example_to_features(self, example):
         """
         example single snetence
-        {"name": str,
+        {"clip_id": str,
          "duration": float,
          "timestamp": [st(float), ed(float)],
          "sentence": str
         } or
-        {"name": str,
+        {"clip_id": str,
          "duration": float,
          "timestamps": list([st(float), ed(float)]),
          "sentences": list(str)
         }
         """
-        raw_name = example["name"]
+        # raw_name: clip_id
+        raw_name = example["clip_id"]
         # ver. future
         emb_feat = self._load_ponnet_video_feature(
             raw_name
@@ -202,7 +232,7 @@ class RecursiveCaptionDataset(data.Dataset):
         single_video_meta = []
         # cur_data:video特徴量を含むdict
         cur_data, cur_meta = self.clip_sentence_to_feature(
-            example["name"],
+            example["clip_id"],
             example["sentences"],
             video_feature,
         )
@@ -245,7 +275,7 @@ class RecursiveCaptionDataset(data.Dataset):
             [self.IGNORE] * len(video_tokens)
             + [
                 self.IGNORE if m == 0 else tid
-                for tid, m in zip(input_ids[-len(text_mask) :], text_mask)
+                for tid, m in zip(input_ids[-len(text_mask):], text_mask)
             ][1:]
             + [self.IGNORE]
         )
@@ -318,6 +348,8 @@ class RecursiveCaptionDataset(data.Dataset):
         All non-PAD values are valid, with a mask value of 1
         """
         max_t_len = self.max_t_len
+
+        # 文を単語区切りにする
         sentence_tokens = nltk.tokenize.word_tokenize(sentence.lower())[: max_t_len - 2]
         sentence_tokens = [self.BOS_TOKEN] + sentence_tokens + [self.EOS_TOKEN]
 
@@ -370,7 +402,7 @@ class RecursiveCaptionDataset(data.Dataset):
         for e in raw_batch_meta:
             cur_meta = dict(name=None, timestamp=[], gt_sentence=[])
             for d in e:
-                cur_meta["name"] = d["name"]
+                cur_meta["clip_id"] = d["clip_id"]
                 cur_meta["gt_sentence"].append(d["sentence"])
             batch_meta.append(cur_meta)
 
@@ -403,7 +435,7 @@ class RecursiveCaptionDataset(data.Dataset):
 
 def prepare_batch_inputs(batch, use_cuda: bool, non_blocking=False):
     batch_inputs = dict()
-    bsz = len(batch["name"])
+    bsz = len(batch["clip_id"])
     for k, v in list(batch.items()):
         assert bsz == len(v), (bsz, k, v)
         if use_cuda:
