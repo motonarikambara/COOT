@@ -577,6 +577,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                                     # remove encoding
                                     # .encode("ascii", "ignore"),
                                     "gt_sentence": cur_meta["gt_sentence"][step_idx],
+                                    "clip_id": cur_meta["clip_id"][step_idx]
                                 }
                             )
                     if self.cfg.debug:

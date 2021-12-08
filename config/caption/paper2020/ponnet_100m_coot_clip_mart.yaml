@@ -30,7 +30,7 @@ length_penalty_name: "none"
 length_penalty_alpha: 0.
 # ---------- Dataset / Dataloader ----------
 dataset_train:
-    name: "youcook2"
+    name: "ponnet"
     data_type: "auto"
     subset: "default"
     split: "train"
@@ -49,14 +49,14 @@ max_n_sen_add_val: 10
 max_t_len: 22
 max_v_len: 3 # 3 for mart with coot, 100 for rgb+flow video features
 type_vocab_size: 2
-word_vec_size: 300loss
+word_vec_size: 173
 # COOT embeddings. Set coot_model_name to null to train on video features
 coot_model_name: "yc2_100m_coot"
-coot_dim_clip: 384
+coot_dim_clip: 512
 coot_dim_vid: 768
 coot_mode: "clip"
 # Video feature size: 3072 for rgb+flow features, 1152 for COOT vidclip, 384 for COOT clip
-video_feature_size: 384
+video_feature_size: 512
 # ---------- Technical ----------
 random_seed: null
 use_cuda: true
@@ -84,7 +84,7 @@ untied: false # untied model
 mtrans: false # vanilla transformer
 xl: false # transformer xl
 xl_grad: false # transformer xl with gradient
-use_glove: true
+use_glove: False
 freeze_glove: false
 # ---------- Optimization ----------
 ema_decay: 0.9999

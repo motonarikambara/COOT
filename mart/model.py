@@ -537,6 +537,7 @@ class EmbeddingsWithVideo(nn.Module):
         """
         add_postion_embeddings: whether to add absolute positional embeddings
         """
+        cfg.video_feature_size = 384
         self.add_postion_embeddings = add_postion_embeddings
         self.word_embeddings = nn.Embedding(
             cfg.vocab_size, cfg.word_vec_size, padding_idx=0
@@ -713,6 +714,7 @@ class RecursiveTransformer(nn.Module):
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         # clipの特徴量の次元
         input_size = 384
+        self.size_adjust = nn.Linear(512, 384)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -746,16 +748,19 @@ class RecursiveTransformer(nn.Module):
             module.bias.data.zero_()
 
     def forward_step(
-        self, input_ids, video_features, input_masks, token_type_ids, gt_clip
+        self, input_ids, video_features, input_masks, token_type_ids, gt_clip=None
     ):
         """
         single step forward in the recursive structure
         """
+        video_features = self.size_adjust(video_features)
         self.future_rec = []
         self.future_gt = []
+        if gt_clip is None:
+            gt_clip = video_features[:, 1:4, :].clone().cuda()
         # preprocess
         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
-        clip_feats[:, 1:3, :] = video_features[:, 1:3, :].clone()
+        clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
         future_b = torch.zeros(video_features[:, 3, :].shape)
         future_b = video_features[:, 3, :].clone()
@@ -802,7 +807,7 @@ class RecursiveTransformer(nn.Module):
         input_masks_list,
         token_type_ids_list,
         input_labels_list,
-        gt_clip,
+        gt_clip=None,
     ):
         """
         Args:
@@ -823,26 +828,39 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         future_rec = []
         future_gt = []
-        for idx in range(step_size):
-            encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
-                input_ids_list[idx],
-                video_features_list[idx],
-                input_masks_list[idx],
-                token_type_ids_list[idx],
-                gt_clip[idx],
-            )
-            future_gt.append(gt_clip[idx][:, 1, :])
-            future_rec.append(pred_future)
-            encoded_outputs_list.append(encoded_layer_outputs)
-            prediction_scores_list.append(prediction_scores)
+        if gt_clip is not None:
+            for idx in range(step_size):
+                encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                    input_ids_list[idx],
+                    video_features_list[idx],
+                    input_masks_list[idx],
+                    token_type_ids_list[idx],
+                    gt_clip[idx],
+                )
+                future_gt.append(gt_clip[idx][:, 1, :])
+                future_rec.append(pred_future)
+                encoded_outputs_list.append(encoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
+        else:
+            for idx in range(step_size):
+                encoded_layer_outputs, prediction_scores = self.forward_step(
+                    input_ids_list[idx],
+                    video_features_list[idx],
+                    input_masks_list[idx],
+                    token_type_ids_list[idx]
+                )
+                encoded_outputs_list.append(encoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
         # compute loss, get predicted words
         caption_loss = 0.0
+        fut_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
-            fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+            if gt_clip is not None:
+                fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss += snt_loss + fut_loss
             # caption_loss += snt_loss
         return caption_loss, prediction_scores_list
