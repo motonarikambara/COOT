@@ -6,5 +6,5 @@ val_dict = {}
 for i in cap_data:
     val_dict[i["clip_id"]] = i["sentence"]
 
-with open('captioning_val_para', 'w') as f:
+with open('captioning_val_para.json', 'w') as f:
     json.dump(val_dict, f)

@@ -36,5 +36,5 @@ def get_reference_files(
     if dset_name == "youcook2":
         return {"val": [annotations_dir / "captioning_val_para.json"]}
     if dset_name == "ponnet":
-        return {"val": [annotations_dir / "captioning_val.json"]}
+        return {"val": [annotations_dir / "captioning_val_para.json"]}
     raise ValueError(f"Dataset unknown {dset_name}")

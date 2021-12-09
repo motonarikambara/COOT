@@ -235,6 +235,6 @@ class Translator(object):
         for k, v in list(res_dict.items()):
             # final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"][0]))
             # final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"]))
-            print(v)
+            # print(v)
             final_res_dict[k] = sorted(v, key=lambda x: float(x["clip_id"]))
         return final_res_dict
