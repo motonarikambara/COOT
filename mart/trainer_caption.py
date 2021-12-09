@@ -699,7 +699,8 @@ class MartTrainer(trainer_base.BaseTrainer):
 
         # find field which determines whether this is a new best epoch
         if self.cfg.val.det_best_field == "cider":
-            val_score = flat_metrics["CIDEr"]
+            # print(flat_metrics)
+            val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
         else:
             raise NotImplementedError(
                 f"best field {self.cfg.val.det_best_field} not known"
