@@ -183,8 +183,8 @@ class RecursiveCaptionDataset(data.Dataset):
             else:
                 # new version, everything in the h5
                 # decode video ids from byte to utf8
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                vid_ids = [key for key in data_file["key"]]
+                vid_ids = [key.decode("utf8") for key in data_file["key"]]
+                # vid_ids = [key for key in data_file["key"]]
 
                 # load clip information
                 clip_nums = data_file["clip_num"]
