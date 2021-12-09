@@ -23,19 +23,21 @@ from s3dg import S3D
 #         i += 1
 
 # 動画のレート変更
-# for i in range(340):
-#     file_name = str(i) + ".mp4"
-#     newfile_name = "_" + str(i) + ".mp4"
-#     ffmpeg = "ffmpeg -i {0} -r 4 {1}".format(file_name, newfile_name)
+# clip = 1
+# for i in range(900):
+#     file_name = "./samples/" + str(clip) + ".mp4"
+#     newfile_name = "./samples/_" + str(clip) + ".mp4"
+#     ffmpeg = "ffmpeg -i {0} -t 00:00:02.500 -r 14 {1}".format(file_name, newfile_name)
 #     subprocess.call(ffmpeg, shell=True)
+#     clip += 1
 
 # S3Dを用いた動画埋め込み
 net = S3D('s3d_dict.npy', 512).cuda()
 net.load_state_dict(torch.load('s3d_howto100m.pth'))
 net = net.eval()
-for i in tqdm(range(340)):
+for i in tqdm(range(1, 901)):
     tmp_vid = []
-    newfile_name = "_" + str(i) + ".mp4"
+    newfile_name = "./samples/_" + str(i) + ".mp4"
     cap_file = cv2.VideoCapture(newfile_name)
     video = torch.zeros((1, 3, 32, 224, 224))
     for j in range(32):
