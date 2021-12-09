@@ -59,6 +59,7 @@ def update_mart_config_from_args(
         assert args.dataset_max > 0, "--dataset_max must be positive int."
         config["dataset_train"]["max_datapoints"] = args.dataset_max
         config["dataset_val"]["max_datapoints"] = args.dataset_max
+        config["loss_weight"] = args.loss_weight
         if verbose:
             print(
                 f"    Change config: Set dataset_(train|val).max_datapoints to {args.dataset_max}"

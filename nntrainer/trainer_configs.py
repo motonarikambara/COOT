@@ -61,6 +61,7 @@ class BaseExperimentConfig(typext.ConfigClass):
         self.cuda_non_blocking: bool = config.pop("cuda_non_blocking")
         self.fp16_train: bool = config.pop("fp16_train")
         self.fp16_val: bool = config.pop("fp16_val")
+        self.loss_weight: float = config.pop("loss_weight")
 
     def post_init(self):
         """
