@@ -57,7 +57,7 @@ def main():
     set_seed(cfg.random_seed, cudnn_deterministic=cfg.cudnn_deterministic, cudnn_benchmark=cfg.cudnn_benchmark)
 
     # create dataset
-    train_set, val_set, train_loader, val_loader = create_mart_datasets_and_loaders(
+    train_set, val_set, train_loader, val_loader, _, test_loader = create_mart_datasets_and_loaders(
         cfg, args.coot_feat_dir, args.annotations_dir, args.video_feature_dir)
 
     # run_number: run name
@@ -92,6 +92,7 @@ def main():
         else:
             # run training
             trainer.train_model(train_loader, val_loader)
+            trainer.validate_epoch(test_loader)
 
         # done with this round
         trainer.close()

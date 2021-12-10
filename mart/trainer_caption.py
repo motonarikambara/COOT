@@ -581,10 +581,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                                     "clip_id": cur_meta["clip_id"]
                                 }
                             )
-                    # if self.cfg.debug:
-                    #     print(
-                    #         f"Vid feat {[v.mean().item() for v in video_features_list]}"
-                    #     )
 
                 # keep logs
                 n_correct = 0

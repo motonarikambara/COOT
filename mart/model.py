@@ -681,7 +681,6 @@ class PositionwiseFF(nn.Module):
         return output
 
 
-
 # MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
@@ -698,12 +697,6 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
 
-        # self.future_linear = nn.Sequential(nn.Linear(384, 786),
-        #                                     nn.GELU(),
-        #                                     nn.Linear(786, 384),
-        #                                     nn.GELU())
-        # self.future_linear = nn.Linear(384, 384)
-        # self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
     def init_bert_weights(self, module):
