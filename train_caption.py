@@ -92,6 +92,7 @@ def main():
         else:
             # run training
             trainer.train_model(train_loader, val_loader)
+            print("##############################")
             trainer.validate_epoch(test_loader)
 
         # done with this round

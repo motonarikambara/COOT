@@ -557,7 +557,7 @@ def create_mart_datasets_and_loaders(
         preload=cfg.dataset_val.preload,
     )
     test_loader = data.DataLoader(
-        val_dataset,
+        test_dataset,
         collate_fn=val_dataset.collate_fn,
         batch_size=cfg.val.batch_size,
         shuffle=cfg.dataset_val.shuffle,
