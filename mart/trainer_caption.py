@@ -39,7 +39,7 @@ from nntrainer.metric import (
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
-# import wandb
+import wandb
 
 
 def cal_performance(pred, gold):
@@ -304,7 +304,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        # wandb.init(name="tmp", project="mart")
+        wandb.init(name="ponnet", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -381,7 +381,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         token_type_ids_list,
                         input_labels_list
                     )
-                    # wandb.log({"train_loss": loss})
+                    wandb.log({"train_loss": loss})
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
