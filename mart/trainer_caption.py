@@ -39,7 +39,7 @@ from nntrainer.metric import (
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
-import wandb
+# import wandb
 
 
 def cal_performance(pred, gold):
@@ -304,7 +304,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="tmp", project="mart")
+        # wandb.init(name="tmp", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -381,7 +381,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         token_type_ids_list,
                         input_labels_list
                     )
-                    wandb.log({"train_loss": loss})
+                    # wandb.log({"train_loss": loss})
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -566,6 +566,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                     for example_idx, (step_size, cur_meta) in enumerate(
                         zip(step_sizes, meta)
                     ):
+                        # print(cur_meta)
                         # example_idx indicates which example is in the batch
                         for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
                             # step_idx or we can also call it sen_idx
@@ -576,14 +577,14 @@ class MartTrainer(trainer_base.BaseTrainer):
                                     ),
                                     # remove encoding
                                     # .encode("ascii", "ignore"),
-                                    "gt_sentence": cur_meta["gt_sentence"][step_idx],
-                                    "clip_id": cur_meta["clip_id"][step_idx]
+                                    "gt_sentence": cur_meta["gt_sentence"],
+                                    "clip_id": cur_meta["clip_id"]
                                 }
                             )
-                    if self.cfg.debug:
-                        print(
-                            f"Vid feat {[v.mean().item() for v in video_features_list]}"
-                        )
+                    # if self.cfg.debug:
+                    #     print(
+                    #         f"Vid feat {[v.mean().item() for v in video_features_list]}"
+                    #     )
 
                 # keep logs
                 n_correct = 0
