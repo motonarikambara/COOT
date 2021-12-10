@@ -346,8 +346,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # feat∈25×1152
         # includes [CLS], [SEP]
         feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))
-        # feat[1:len(raw_feat) + 1] = raw_feat
-        feat[1:4] = raw_feat
+        feat[1:len(raw_feat) + 1] = raw_feat
+        # feat[1:4] = raw_feat
         # includes [CLS], [SEP]
         return feat, video_tokens, mask
 
