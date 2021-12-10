@@ -109,16 +109,16 @@ def collect_results_data(exp_type: str, exp_groups_names: Dict[str, List[str]], 
             step_data = json.load(step_file.open("rt", encoding="utf8"))
 
             # average step timings and GPU load over all steps
-            for key in (DefaultMetricsConst.TIME_STEP_FORWARD, DefaultMetricsConst.TIME_STEP_BACKWARD,
-                        DefaultMetricsConst.TIME_STEP_OTHER,
-                        DefaultMetricsConst.TIME_STEP_TOTAL, DefaultMetricsConst.PROFILE_GPU_LOAD):
-                avg_val = np.mean([val for _, val in step_data[f"{key}-avg"]])
-                collector[exp_ident][key] = avg_val
+            # for key in (DefaultMetricsConst.TIME_STEP_FORWARD, DefaultMetricsConst.TIME_STEP_BACKWARD,
+            #             DefaultMetricsConst.TIME_STEP_OTHER,
+            #             DefaultMetricsConst.TIME_STEP_TOTAL, DefaultMetricsConst.PROFILE_GPU_LOAD):
+                # avg_val = np.mean([val for _, val in step_data[f"{key}-avg"]])
+            #     collector[exp_ident][key] = avg_val
 
-            # take the max of GPU and RAM memory load over all steps
-            for key in (DefaultMetricsConst.PROFILE_GPU_MEM_USED, DefaultMetricsConst.PROFILE_RAM_USED):
-                max_val = np.max([val for _, val in step_data[key]])
-                collector[exp_ident][key] = max_val
+            # # take the max of GPU and RAM memory load over all steps
+            # for key in (DefaultMetricsConst.PROFILE_GPU_MEM_USED, DefaultMetricsConst.PROFILE_RAM_USED):
+            #     max_val = np.max([val for _, val in step_data[key]])
+            #     collector[exp_ident][key] = max_val
     if len(not_found_list) > 0:
         # print warning about not having found some results
         logger.info(f"No results found for {not_found_list}")

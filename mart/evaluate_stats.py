@@ -51,19 +51,19 @@ def evaluate_stats_files(
     ref_data = json.load(open(reference_file, "r"))
     sub_data = sub_data["results"] if "results" in sub_data else sub_data
     ref_data = ref_data["results"] if "results" in ref_data else ref_data
-    # sub_data = {k: v for k, v in list(sub_data.items()) if k in ref_data}
-    tmp_data = {}
-    for _subdata in sub_data.values():
-        for data in _subdata:
-            if data["clip_id"] in ref_data:
-                tmp_data[data["clip_id"]] = {"sentence": data["sentence"], "gt_sentence": data["gt_sentence"]}
+    sub_data = {k: v for k, v in list(sub_data.items()) if k in ref_data}
+    # tmp_data = {}
+    # for _subdata in sub_data.values():
+    #     for data in _subdata:
+    #         if data["clip_id"] in ref_data:
+    #             tmp_data[data["clip_id"]] = {"sentence": data["sentence"], "gt_sentence": data["gt_sentence"]}
 
-    sub_data = tmp_data
+    # sub_data = tmp_data
 
     submission_data_entries = [
         item for sublist in list(sub_data.values()) for item in sublist
     ]
-    print(submission_data_entries)
+    # print(submission_data_entries)
 
     submission_sentences = [e["sentence"] for e in submission_data_entries]
     submission_stat = get_sen_stat(submission_sentences)
@@ -74,7 +74,7 @@ def evaluate_stats_files(
     final_res = {"submission": submission_stat}
 
     if "gt_sentence" in submission_data_entries[0]:
-        gt_sentences = [e["gt_sentence"] for e in submission_data_entries]
+        gt_sentences = [e["gt_sentence"][0] for e in submission_data_entries]
         gt_stat = get_sen_stat(gt_sentences)  # only one reference is used here!!!
         final_res["gt_stat"] = gt_stat
 

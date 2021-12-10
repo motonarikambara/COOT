@@ -570,7 +570,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         # example_idx indicates which example is in the batch
                         for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
                             # step_idx or we can also call it sen_idx
-                            batch_res["results"][cur_meta["name"]].append(
+                            batch_res["results"][cur_meta["clip_id"]].append(
                                 {
                                     "sentence": dataset.convert_ids_to_sentence(
                                         step_batch[example_idx].cpu().tolist()
