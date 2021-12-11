@@ -25,11 +25,11 @@ clip_file = "483clips.txt"
 #         i += 1
 
 # 動画のレート変更
-# for i in range(480):
-#     file_name = "./samples/" + str(i) + ".mp4"
-#     newfile_name = "./samples/" + "_" + str(i) + ".mp4"
-#     ffmpeg = "ffmpeg -i {0} -r 4 {1}".format(file_name, newfile_name)
-#     subprocess.call(ffmpeg, shell=True)
+for i in range(480):
+    file_name = "./samples/" + str(i) + ".mp4"
+    newfile_name = "./future_sample/" + "_" + str(i) + ".mp4"
+    ffmpeg = "ffmpeg -i {0} -r 4 {1}".format(file_name, newfile_name)
+    subprocess.call(ffmpeg, shell=True)
 
 # S3Dを用いた動画埋め込み
 net = S3D("s3d_dict.npy", 512).cuda()
@@ -37,7 +37,7 @@ net.load_state_dict(torch.load("s3d_howto100m.pth"))
 net = net.eval()
 for i in tqdm(range(1, 901)):
     tmp_vid = []
-    newfile_name = "./samples/" + "_" + str(i) + ".mp4"
+    newfile_name = "./future_sample/" + "_" + str(i) + ".mp4"
     cap_file = cv2.VideoCapture(newfile_name)
     video = torch.zeros((1, 3, 32, 224, 224))
     for j in range(32):
@@ -55,6 +55,6 @@ for i in tqdm(range(1, 901)):
     del video_output
     torch.cuda.empty_cache()
     raw_data = str(i) + ".pkl"
-    file_name = os.path.join("emb_feats", raw_data)
+    file_name = os.path.join("future_emb_feats", raw_data)
     with open(file_name, "wb") as f:
         pickle.dump(emb_feat, f)

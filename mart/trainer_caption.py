@@ -354,7 +354,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         e["token_type_ids"] for e in batched_data
                     ]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-
+                    gt_clip = [e["gt_clip"] for e in batched_data]
                     if self.cfg.debug:
                         cur_data = batched_data[step]
                         self.logger.info(
@@ -379,7 +379,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                         video_features_list,
                         input_masks_list,
                         token_type_ids_list,
-                        input_labels_list
+                        input_labels_list,
+                        gt_clip
                     )
                     wandb.log({"train_loss": loss})
 
@@ -537,6 +538,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                     input_masks_list = [e["input_mask"] for e in batched_data]
                     token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
+                    gt_clip = [e["gt_clip"] for e in batched_data]
+
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
@@ -544,6 +547,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list,
                         token_type_ids_list,
                         input_labels_list,
+                        gt_clip
                     )
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz

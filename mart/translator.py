@@ -125,7 +125,7 @@ class Translator(object):
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
-                _, pred_scores = model.forward_step(
+                _, pred_scores, _ = model.forward_step(
                     input_ids,
                     video_features,
                     input_masks,
