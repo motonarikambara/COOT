@@ -808,6 +808,7 @@ class RecursiveTransformer(nn.Module):
             )
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
         # clipの特徴量の次元
         input_size = 384
         self.pred_f = nn.Sequential(
@@ -953,8 +954,13 @@ class RecursiveTransformer(nn.Module):
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
+            cont_loss = 0.0
+            tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
+            tmp_idx_list = input_labels_list[idx].view(-1)
+            for i in range(1, len(tmp_pred_score_list)):
+                    cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                0.9 * snt_loss + 0.1 * fut_loss
+                0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
             # caption_loss += snt_loss
         return caption_loss, prediction_scores_list
