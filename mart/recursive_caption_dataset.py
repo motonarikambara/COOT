@@ -187,9 +187,11 @@ class RecursiveCaptionDataset(data.Dataset):
             self.clip_nums.append(str(clip))
 
         self.frame_to_second = None  # Don't need this for COOT embeddings
+
         print(
             f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}"
         )
+
         self.preloading_done = False
 
     def __len__(self):
@@ -215,9 +217,12 @@ class RecursiveCaptionDataset(data.Dataset):
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
         file_n = os.path.join(".", "ponnet_data", "emb_feats", feat_file)
+        all_feat_n = os.path.join(".", "ponnet_data", "future_emb_feats", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
-        return emb_feat
+        with open(all_feat_n, "rb") as f:
+            all_emb_feat = pickle.load(f)
+        return emb_feat, all_emb_feat
 
     def convert_example_to_features(self, example):
         """
@@ -236,10 +241,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # raw_name: clip_id
         raw_name = example["clip_id"]
         # ver. future
-        emb_feat = self._load_ponnet_video_feature(
+        emb_feat, all_emb_feat = self._load_ponnet_video_feature(
             raw_name
         )
         video_feature = emb_feat
+        gt_feat = all_emb_feat
         single_video_features = []
         single_video_meta = []
         # cur_data:video特徴量を含むdict
@@ -348,8 +354,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # feat∈25×1152
         # includes [CLS], [SEP]
         feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))
-        feat[1:len(raw_feat) + 1] = raw_feat
-        # feat[1:4] = raw_feat
+        # feat[1:len(raw_feat) + 1] = raw_feat
+        feat[1:4] = raw_feat
         # includes [CLS], [SEP]
         return feat, video_tokens, mask
 
@@ -537,7 +543,6 @@ def create_mart_datasets_and_loaders(
         num_workers=cfg.dataset_val.num_workers,
         pin_memory=cfg.dataset_val.pin_memory,
     )
-
     test_dataset = RecursiveCaptionDataset(
         cfg.dataset_val.name,
         cfg.max_t_len,
