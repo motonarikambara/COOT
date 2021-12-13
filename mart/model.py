@@ -845,8 +845,6 @@ class RecursiveTransformer(nn.Module):
         # clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
 
         # clip_feats = self.ff(clip_feats)
-        # clip_feats[:, 2, :] = pred_future.clone()
-        clip_feats = clip_feats.cuda()
 
         # Time Series Module
         _, clip_feats = self.TSModule(clip_feats)
