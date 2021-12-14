@@ -28,7 +28,7 @@ def compare_res(res_path, out_path):
         video = res[vid]
         for clip in video:
             tmp_comp = []
-            tmp_comp.append(clip["timestamp"])
+            # tmp_comp.append(clip["timestamp"])
             tmp_comp.append(clip["sentence"])
             tmp_comp.append(clip["gt_sentence"])
             comp.append(tmp_comp)
