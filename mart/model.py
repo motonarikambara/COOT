@@ -958,7 +958,9 @@ class RecursiveTransformer(nn.Module):
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
             for i in range(1, len(tmp_pred_score_list)):
-                    cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            for i in range(0, len(tmp_pred_score_list) - 1):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
                 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
