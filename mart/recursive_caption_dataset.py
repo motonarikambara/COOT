@@ -135,11 +135,11 @@ class RecursiveCaptionDataset(data.Dataset):
                 data_path = self.annotations_dir / tmp_path / "captioning_train.json"
             elif mode == "val":  # 457 videos
                 # data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
-                data_path = self.annotations_dir / tmp_path / "captioning_val.json"
-            elif mode == "test":
                 data_path = self.annotations_dir / tmp_path / "captioning_val2.json"
-                mode = "val"
-                self.mode = "val"
+            elif mode == "test":
+                data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+                # mode = "val"
+                # self.mode = "val"
             else:
                 raise ValueError(
                     f"Mode must be [train, val] for {self.dset_name}, got {mode}"
@@ -186,8 +186,9 @@ class RecursiveCaptionDataset(data.Dataset):
             self.data_type = DataTypesConstCaption.COOT_EMB
 
             # for activitynet, coot val split contains both ae-val and ae-test splits
+            if self.mode == "val":
+                coot_dataset_mode = "train"
             coot_dataset_mode = "val" if self.mode == "test" else self.mode
-
             self.coot_emb_h5_file = (
                 self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
             )
@@ -212,9 +213,9 @@ class RecursiveCaptionDataset(data.Dataset):
                 # new version, everything in the h5
                 # decode video ids from byte to utf8
                 # for note PC
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
+                vid_ids = [key.decode("utf8") for key in data_file["key"]]
                 # for desktop
-                vid_ids = [key for key in data_file["key"]]
+                # vid_ids = [key for key in data_file["key"]]
 
                 # load clip information
                 clip_nums = data_file["clip_num"]
