@@ -136,6 +136,10 @@ class RecursiveCaptionDataset(data.Dataset):
             elif mode == "val":  # 457 videos
                 # data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
                 data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+            elif mode == "test":
+                data_path = self.annotations_dir / tmp_path / "captioning_val2.json"
+                mode = "val"
+                self.mode = "val"
             else:
                 raise ValueError(
                     f"Mode must be [train, val] for {self.dset_name}, got {mode}"
@@ -761,5 +765,32 @@ def create_mart_datasets_and_loaders(
         num_workers=cfg.dataset_val.num_workers,
         pin_memory=cfg.dataset_val.pin_memory,
     )
+    test_dataset = RecursiveCaptionDataset(
+        cfg.dataset_val.name,
+        cfg.max_t_len,
+        cfg.max_v_len,
+        max_n_sen_val,
+        mode="test",
+        recurrent=cfg.recurrent,
+        untied=cfg.untied or cfg.mtrans,
+        video_feature_dir=video_feature_dir,
+        coot_model_name=cfg.coot_model_name,
+        coot_mode=cfg.coot_mode,
+        coot_dim_vid=cfg.coot_dim_vid,
+        coot_dim_clip=cfg.coot_dim_clip,
+        annotations_dir=annotations_dir,
+        coot_feat_dir=coot_feat_dir,
+        dataset_max=cfg.dataset_val.max_datapoints,
+        preload=cfg.dataset_val.preload,
+    )
+    test_loader = data.DataLoader(
+        test_dataset,
+        collate_fn=val_dataset.collate_fn,
+        batch_size=cfg.val.batch_size,
+        shuffle=cfg.dataset_val.shuffle,
+        num_workers=cfg.dataset_val.num_workers,
+        pin_memory=cfg.dataset_val.pin_memory,
+    )
 
-    return train_dataset, val_dataset, train_loader, val_loader
+    # return train_dataset, val_dataset, train_loader, val_loader
+    return train_dataset, val_dataset, train_loader, val_loader, test_dataset, test_loader

@@ -294,8 +294,10 @@ class MartTrainer(trainer_base.BaseTrainer):
         if self.load_model or cfg.ema_decay <= 0:
             self.ema = None
 
+        self.beforeloss = 0.0
+
     def train_model(
-        self, train_loader: data.DataLoader, val_loader: data.DataLoader
+        self, train_loader: data.DataLoader, val_loader: data.DataLoader, test_loader
     ) -> None:
         """
         Train epochs until done.
@@ -461,6 +463,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                 _val_loss, _val_score, is_best, _metrics = self.validate_epoch(
                     val_loader
                 )
+                if is_best:
+                    print("#############################################")
+                    print("Do test")
+                    self.test_epoch(test_loader)
+                    print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
@@ -471,6 +478,12 @@ class MartTrainer(trainer_base.BaseTrainer):
 
         # show end of training log message
         self.hook_post_train()
+        print("###################################################")
+        self.logger.info(
+            ", ".join(
+                [f"{name} {self.higest_test[name]:.2%}" for name in self.test_metrics]
+            )
+        )
 
     @th.no_grad()
     def validate_epoch(
@@ -551,6 +564,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_labels_list,
                         future_clips,
                     )
+                    if self.beforeloss != 0.0:
+                        loss_delta = self.beforeloss - loss
+                        wandb.log({"val_loss_diff": loss_delta})
+                    wandb.log({"val_loss": loss})
+                    self.beforeloss = loss
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
@@ -698,6 +716,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         )
 
         # find field which determines whether this is a new best epoch
+        # "Bleu_4", "METEOR", "ROUGE_L", "CIDEr"
+        wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
         if self.cfg.val.det_best_field == "cider":
             # print(flat_metrics)
             # val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
@@ -743,6 +763,210 @@ class MartTrainer(trainer_base.BaseTrainer):
                     self.logger.info(f"Updated meteor in file {metrics_file}")
 
         return total_loss, val_score, is_best, flat_metrics
+
+
+    @th.no_grad()
+    def test_epoch(
+        self, data_loader: data.DataLoader
+    ) -> (Tuple[float, float, bool, Dict[str, float]]):
+        """
+        Run both validation and translation.
+        Validation: The same setting as training, where ground-truth word x_{t-1} is used to predict next word x_{t},
+        not realistic for real inference.
+        Translation: Use greedy generated words to predicted next words, the true inference situation.
+        eval_mode can only be set to `val` here, as setting to `test` is cheating
+        0. run inference, 1. Get METEOR, BLEU1-4, CIDEr scores, 2. Get vocab size, sentence length
+        Args:
+            data_loader: Dataloader for validation
+        Returns:
+            Tuple of:
+                validation loss
+                validation score
+                epoch is best
+                custom metrics with translation results dictionary
+        """
+        self.hook_pre_val_epoch()  # pre val epoch hook: set models to val and start timers
+        forward_time_total = 0
+        total_loss = 0
+        n_word_total = 0
+        n_word_correct = 0
+
+        # setup ema
+        if self.ema is not None:
+            self.ema.assign(self.model)
+
+        # setup translation submission
+        batch_res = {
+            "version": "VERSION 1.0",
+            "results": defaultdict(list),
+            "external_data": {"used": "true", "details": "ay"},
+        }
+        dataset: RecursiveCaptionDataset = data_loader.dataset
+
+        # ---------- Dataloader Iteration ----------
+        num_steps = 0
+        pbar = tqdm(
+            total=len(data_loader), desc=f"Validate epoch {self.state.current_epoch}"
+        )
+        for _step, batch in enumerate(data_loader):
+            # ---------- forward pass ----------
+            self.hook_pre_step_timer()  # hook for step timing
+
+            with autocast(enabled=self.cfg.fp16_val):
+                if self.cfg.recurrent:
+                    # recurrent MART, TransformerXL, ...
+                    # get data
+                    batched_data = [
+                        prepare_batch_inputs(
+                            step_data,
+                            use_cuda=self.cfg.use_cuda,
+                            non_blocking=self.cfg.cuda_non_blocking,
+                        )
+                        for step_data in batch[0]
+                    ]
+                    # validate (ground truth as input for next token)
+                    input_ids_list = [e["input_ids"] for e in batched_data]
+                    video_features_list = [e["video_feature"] for e in batched_data]
+                    input_masks_list = [e["input_mask"] for e in batched_data]
+                    token_type_ids_list = [e["token_type_ids"] for e in batched_data]
+                    input_labels_list = [e["input_labels"] for e in batched_data]
+                    gt_clip = [e["gt_clip"] for e in batched_data]
+
+                    # ver. future
+                    loss, pred_scores_list = self.model(
+                        input_ids_list,
+                        video_features_list,
+                        input_masks_list,
+                        token_type_ids_list,
+                        input_labels_list,
+                        gt_clip
+                    )
+                    wandb.log({"test_loss": loss})
+                    # translate (no ground truth text)
+                    step_sizes = batch[1]  # list(int), len == bsz
+                    meta = batch[2]  # list(dict), len == bsz
+
+                    model_inputs = [
+                        [e["input_ids"] for e in batched_data],
+                        [e["video_feature"] for e in batched_data],
+                        [e["input_mask"] for e in batched_data],
+                        [e["token_type_ids"] for e in batched_data],
+                    ]
+                    dec_seq_list = self.translator.translate_batch(
+                        model_inputs,
+                        use_beam=self.cfg.use_beam,
+                        recurrent=True,
+                        untied=False,
+                        xl=self.cfg.xl,
+                    )
+
+                    for example_idx, (step_size, cur_meta) in enumerate(
+                        zip(step_sizes, meta)
+                    ):
+                        # example_idx indicates which example is in the batch
+                        for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
+                            # step_idx or we can also call it sen_idx
+                            batch_res["results"][cur_meta["clip_id"]].append(
+                                {
+                                    "sentence": dataset.convert_ids_to_sentence(
+                                        step_batch[example_idx].cpu().tolist()
+                                    ),
+                                    "gt_sentence": cur_meta["gt_sentence"],
+                                    "clip_id": cur_meta["clip_id"]
+                                }
+                            )
+
+                # keep logs
+                n_correct = 0
+                n_word = 0
+                for pred, gold in zip(pred_scores_list, input_labels_list):
+                    n_correct += cal_performance(pred, gold)
+                    valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
+                    n_word += valid_label_mask.sum().item()
+
+                # calculate metrix
+                n_word_total += n_word
+                n_word_correct += n_correct
+                total_loss += loss.item()
+
+            # end of step
+            self.hook_post_forward_step_timer()
+            forward_time_total += self.timedelta_step_forward
+            num_steps += 1
+
+            if self.cfg.debug:
+                break
+
+            pbar.update()
+        pbar.close()
+
+        # ---------- validation done ----------
+
+        # sort translation
+        batch_res["results"] = self.translator.sort_res(batch_res["results"])
+
+        # write translation results of this epoch to file
+        eval_mode = "test"  # which dataset split
+        file_translation_raw = self.exp.get_translation_files(
+            self.state.current_epoch, "test"
+        )
+        json.dump(batch_res, file_translation_raw.open("wt", encoding="utf8"))
+
+        # get reference files (ground truth captions)
+        reference_files_map = get_reference_files(
+            self.cfg.dataset_val.name, self.exp.annotations_dir, test=True
+        )
+        reference_files = reference_files_map[eval_mode]
+        reference_file_single = reference_files[0]
+
+        # language evaluation
+        res_lang = evaluate_language_files(
+            file_translation_raw, reference_files, verbose=False, all_scorer=True
+        )
+        # basic stats
+        res_stats = evaluate_stats_files(
+            file_translation_raw, reference_file_single, verbose=False
+        )
+        # repetition
+        res_rep = evaluate_repetition_files(
+            file_translation_raw, reference_file_single, verbose=False
+        )
+
+        # merge results
+        all_metrics = {**res_lang, **res_stats, **res_rep}
+        assert len(all_metrics) == len(res_lang) + len(res_stats) + len(
+            res_rep
+        ), "Lost infos while merging translation results!"
+
+        # flatten results and make them json compatible
+        flat_metrics = {}
+        for key, val in all_metrics.items():
+            if isinstance(val, Mapping):
+                for subkey, subval in val.items():
+                    flat_metrics[f"{key}_{subkey}"] = subval
+                continue
+            flat_metrics[key] = val
+        for key, val in flat_metrics.items():
+            if isinstance(val, (np.float16, np.float32, np.float64)):
+                flat_metrics[key] = float(val)
+
+        # feed meters
+        for result_key, meter_name in TRANSLATION_METRICS.items():
+            self.metrics.update_meter(meter_name, flat_metrics[result_key])
+
+        # log translation results
+        self.logger.info(
+            f"Done with translation, epoch {self.state.current_epoch} split {eval_mode}"
+        )
+        self.test_metrics = TRANSLATION_METRICS_LOG
+        self.higest_test = flat_metrics
+        wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
+        self.logger.info(
+            ", ".join(
+                [f"{name} {flat_metrics[name]:.2%}" for name in TRANSLATION_METRICS_LOG]
+            )
+        )
+
 
     def get_opt_state(self) -> Dict[str, Dict[str, nn.Parameter]]:
         """
