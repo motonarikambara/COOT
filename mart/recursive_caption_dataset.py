@@ -188,7 +188,10 @@ class RecursiveCaptionDataset(data.Dataset):
             # for activitynet, coot val split contains both ae-val and ae-test splits
             if self.mode == "val":
                 coot_dataset_mode = "train"
-            coot_dataset_mode = "val" if self.mode == "test" else self.mode
+            elif self.mode == "test":
+                coot_dataset_mode = "val" 
+            else:
+                coot_dataset_mode = "train"
             self.coot_emb_h5_file = (
                 self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
             )

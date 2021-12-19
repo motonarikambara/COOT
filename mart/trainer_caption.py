@@ -830,7 +830,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                     input_masks_list = [e["input_mask"] for e in batched_data]
                     token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-                    gt_clip = [e["gt_clip"] for e in batched_data]
+                    future_clips = [e["future_clips"] for e in batched_data]
 
                     # ver. future
                     loss, pred_scores_list = self.model(
@@ -839,7 +839,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list,
                         token_type_ids_list,
                         input_labels_list,
-                        gt_clip
+                        future_clips
                     )
                     wandb.log({"test_loss": loss})
                     # translate (no ground truth text)
@@ -851,6 +851,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                         [e["video_feature"] for e in batched_data],
                         [e["input_mask"] for e in batched_data],
                         [e["token_type_ids"] for e in batched_data],
+                        [e["future_clips"] for e in batched_data]
                     ]
                     dec_seq_list = self.translator.translate_batch(
                         model_inputs,
@@ -866,13 +867,13 @@ class MartTrainer(trainer_base.BaseTrainer):
                         # example_idx indicates which example is in the batch
                         for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
                             # step_idx or we can also call it sen_idx
-                            batch_res["results"][cur_meta["clip_id"]].append(
+                            batch_res["results"][cur_meta["name"]].append(
                                 {
                                     "sentence": dataset.convert_ids_to_sentence(
                                         step_batch[example_idx].cpu().tolist()
                                     ),
-                                    "gt_sentence": cur_meta["gt_sentence"],
-                                    "clip_id": cur_meta["clip_id"]
+                                    "gt_sentence": cur_meta["gt_sentence"][step_idx],
+                                    "timestamp": cur_meta["timestamp"][step_idx]
                                 }
                             )
 
