@@ -20,6 +20,7 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+ACTION_WEIGHT = {34:2603, 538: 426, 547: 300, 54: 283, 169: 250, 551: 225, 598: 186, 198: 158, 748: 147, 403: 138, 317: 134, 589: 132, 209: 104, 99: 94, 407: 89, 94: 89, 343: 80, 452: 79, 493: 79, 675: 77, 336: 73, 270: 72, 308: 67, 887: 59, 561: 51, 8: 50, 842: 47, 962: 45, 266: 44, 234: 42, 304: 40, 744: 33, 690: 31}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
@@ -954,13 +955,13 @@ class RecursiveTransformer(nn.Module):
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
-            cont_loss = 0.0
+            cont_loss = 1.0
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
-            for i in range(1, len(tmp_pred_score_list)):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            for i in range(0, len(tmp_pred_score_list) - 1):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            # for i in range(1, len(tmp_pred_score_list)):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            # for i in range(0, len(tmp_pred_score_list) - 1):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
                 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)

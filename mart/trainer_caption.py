@@ -295,6 +295,9 @@ class MartTrainer(trainer_base.BaseTrainer):
             self.ema = None
 
         self.beforeloss = 0.0
+        self.train_steps = 0
+        self.val_steps = 0
+        self.test_steps = 0
 
     def train_model(
         self, train_loader: data.DataLoader, val_loader: data.DataLoader, test_loader
@@ -387,7 +390,9 @@ class MartTrainer(trainer_base.BaseTrainer):
                             input_labels_list,
                             future_clip,
                         )
-                        wandb.log({"train_loss": loss})
+                        self.train_steps += 1
+                        wandb.log({"train_loss": loss}, step=self.train_steps)
+                        
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -638,10 +643,11 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             pbar.update()
         pbar.close()
+        self.val_steps += 1
         batch_loss /= batch_idx
         if self.beforeloss != 0.0:
             loss_delta = self.beforeloss - batch_loss
-            wandb.log({"val_loss_diff": loss_delta})
+            wandb.log({"val_loss_diff": loss_delta}, step=self.val_steps)
         wandb.log({"val_loss": batch_loss})
         self.beforeloss = batch_loss
 
@@ -791,8 +797,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                 epoch is best
                 custom metrics with translation results dictionary
         """
-        self.hook_pre_val_epoch()  # pre val epoch hook: set models to val and start timers
-        forward_time_total = 0
+        # self.hook_pre_val_epoch()  # pre val epoch hook: set models to val and start timers
+        # forward_time_total = 0
         total_loss = 0
         n_word_total = 0
         n_word_correct = 0
@@ -812,13 +818,16 @@ class MartTrainer(trainer_base.BaseTrainer):
         # ---------- Dataloader Iteration ----------
         num_steps = 0
         pbar = tqdm(
-            total=len(data_loader), desc=f"Validate epoch {self.state.current_epoch}"
+            total=len(data_loader), desc=f"Test epoch {self.state.current_epoch}"
         )
+        test_loss = 0.0
+        num_batch = 0
         for _step, batch in enumerate(data_loader):
             # ---------- forward pass ----------
-            self.hook_pre_step_timer()  # hook for step timing
+            # self.hook_pre_step_timer()  # hook for step timing
 
             with autocast(enabled=self.cfg.fp16_val):
+
                 if self.cfg.recurrent:
                     # recurrent MART, TransformerXL, ...
                     # get data
@@ -847,7 +856,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_labels_list,
                         future_clips
                     )
-                    wandb.log({"test_loss": loss})
+                    test_loss += loss
+                    num_batch += 1
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
@@ -897,8 +907,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                 total_loss += loss.item()
 
             # end of step
-            self.hook_post_forward_step_timer()
-            forward_time_total += self.timedelta_step_forward
+            # self.hook_post_forward_step_timer()
+            # forward_time_total += self.timedelta_step_forward
             num_steps += 1
 
             if self.cfg.debug:
@@ -906,6 +916,10 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             pbar.update()
         pbar.close()
+        self.test_steps += 1
+        test_loss /= num_batch
+        wandb.log({"test_loss": test_loss}, step=self.test_steps)
+
 
         # ---------- validation done ----------
 
