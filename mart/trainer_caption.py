@@ -532,6 +532,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar = tqdm(
             total=len(data_loader), desc=f"Validate epoch {self.state.current_epoch}"
         )
+        batch_loss = 0.0
+        batch_idx = 0
         for _step, batch in enumerate(data_loader):
             # ---------- forward pass ----------
             self.hook_pre_step_timer()  # hook for step timing
@@ -564,11 +566,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_labels_list,
                         future_clips,
                     )
-                    if self.beforeloss != 0.0:
-                        loss_delta = self.beforeloss - loss
-                        wandb.log({"val_loss_diff": loss_delta})
-                    wandb.log({"val_loss": loss})
-                    self.beforeloss = loss
+                    batch_loss += loss
+                    batch_idx += 1
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
@@ -639,6 +638,12 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             pbar.update()
         pbar.close()
+        batch_loss /= batch_idx
+        if self.beforeloss != 0.0:
+            loss_delta = self.beforeloss - batch_loss
+            wandb.log({"val_loss_diff": loss_delta})
+        wandb.log({"val_loss": batch_loss})
+        self.beforeloss = batch_loss
 
         # ---------- validation done ----------
 
@@ -721,7 +726,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         if self.cfg.val.det_best_field == "cider":
             # print(flat_metrics)
             # val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
-            val_score = flat_metrics["CIDEr"]
+            # val_score = flat_metrics["CIDEr"]
+            val_score = -1 * batch_loss
         else:
             raise NotImplementedError(
                 f"best field {self.cfg.val.det_best_field} not known"
@@ -962,11 +968,6 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.test_metrics = TRANSLATION_METRICS_LOG
         self.higest_test = flat_metrics
         wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
-        self.logger.info(
-            ", ".join(
-                [f"{name} {flat_metrics[name]:.2%}" for name in TRANSLATION_METRICS_LOG]
-            )
-        )
 
 
     def get_opt_state(self) -> Dict[str, Dict[str, nn.Parameter]]:
