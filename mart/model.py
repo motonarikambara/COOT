@@ -810,6 +810,7 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
         self.pred_f = nn.Sequential(
@@ -934,6 +935,7 @@ class RecursiveTransformer(nn.Module):
         step_size = len(input_ids_list)
         encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
+        action_score = []
         future_rec = []
         future_gt = []
         for idx in range(step_size):
@@ -948,13 +950,25 @@ class RecursiveTransformer(nn.Module):
             future_rec.append(pred_future)
             encoded_outputs_list.append(encoded_layer_outputs)
             prediction_scores_list.append(prediction_scores)
+            action_score.append(prediction_scores[:, 4, :])
         # compute loss, get predicted words
         caption_loss = 0.0
+        action_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
+            gt_action_list = input_labels_list[idx][:, 4]
+            act_score_list = action_score[idx].cpu()
+            for actidx in range(len(gt_action_list)):
+                gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
+                if gt_action_list[actidx] == -1:
+                    continue
+                if gt_action[0] in ACTION_WEIGHT:
+                    action_loss += (1/ ACTION_WEIGHT[gt_action]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                else:
+                    action_loss += (1/ 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 1.0
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
@@ -964,7 +978,7 @@ class RecursiveTransformer(nn.Module):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
+                0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
         caption_loss /= step_size
             # caption_loss += snt_loss
         return caption_loss, prediction_scores_list

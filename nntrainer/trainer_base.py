@@ -326,7 +326,11 @@ class BaseTrainer:
         old_best = self.state.det_best_field_best
 
         # check if this is a new best
-        is_best = self._check_if_current_score_is_best(result, old_best)
+        # is_best = self._check_if_current_score_is_best(result, old_best)
+        if result < 0.5:
+            is_best = True
+        else:
+            is_best = False
 
         # log info
         old_best_str = f"{old_best:.5f}" if old_best is not None else "NONE"

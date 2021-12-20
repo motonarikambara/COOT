@@ -645,9 +645,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar.close()
         self.val_steps += 1
         batch_loss /= batch_idx
-        if self.beforeloss != 0.0:
-            loss_delta = self.beforeloss - batch_loss
-            wandb.log({"val_loss_diff": loss_delta}, step=self.val_steps)
+        loss_delta = abs(self.beforeloss - batch_loss)
+        wandb.log({"val_loss_diff": loss_delta})
         wandb.log({"val_loss": batch_loss})
         self.beforeloss = batch_loss
 
@@ -740,7 +739,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             )
 
         # check for a new best epoch and update validation results
-        is_best = self.check_is_new_best(val_score)
+        # is_best = self.check_is_new_best(val_score)
+        is_best = self.check_is_new_best(loss_delta)
         self.hook_post_val_epoch(loss_per_word, is_best)
 
         if self.is_test:
@@ -918,7 +918,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar.close()
         self.test_steps += 1
         test_loss /= num_batch
-        wandb.log({"test_loss": test_loss}, step=self.test_steps)
+        wandb.log({"test_loss": test_loss})
 
 
         # ---------- validation done ----------
@@ -980,6 +980,11 @@ class MartTrainer(trainer_base.BaseTrainer):
             f"Done with translation, epoch {self.state.current_epoch} split {eval_mode}"
         )
         self.test_metrics = TRANSLATION_METRICS_LOG
+        self.logger.info(
+            ", ".join(
+                [f"{name} {flat_metrics[name]:.2%}" for name in TRANSLATION_METRICS_LOG]
+            )
+        )
         self.higest_test = flat_metrics
         wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
 
