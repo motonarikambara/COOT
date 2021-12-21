@@ -927,8 +927,6 @@ class RecursiveTransformer(nn.Module):
                 action_score.append(prediction_scores[:, 3, :])
         # compute loss, get predicted words
         caption_loss = 0.0
-        action_loss = 0.0
-        fut_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
@@ -936,6 +934,7 @@ class RecursiveTransformer(nn.Module):
             )
             gt_action_list = input_labels_list[idx][:, 3]
             act_score_list = action_score[idx].cpu()
+            action_loss = 0.0
             for actidx in range(len(gt_action_list)):
                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
                 if gt_action_list[actidx] == -1:
