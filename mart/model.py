@@ -21,6 +21,7 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+ACTION_WEIGHT = {"7": 254, "9": 57}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
@@ -899,6 +900,7 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         future_rec = []
         future_gt = []
+        action_score = []
         if gt_clip is not None:
             for idx in range(step_size):
                 encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
@@ -911,6 +913,7 @@ class RecursiveTransformer(nn.Module):
                 future_rec.append(pred_future)
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
+                action_score.append(prediction_scores[:, 3, :])
         else:
             for idx in range(step_size):
                 encoded_layer_outputs, prediction_scores = self.forward_step(
@@ -921,14 +924,26 @@ class RecursiveTransformer(nn.Module):
                 )
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
+                action_score.append(prediction_scores[:, 3, :])
         # compute loss, get predicted words
         caption_loss = 0.0
+        action_loss = 0.0
         fut_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
+            gt_action_list = input_labels_list[idx][:, 3]
+            act_score_list = action_score[idx].cpu()
+            for actidx in range(len(gt_action_list)):
+                gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
+                if gt_action_list[actidx] == -1:
+                    continue
+                if gt_action[0] in ACTION_WEIGHT:
+                    action_loss += (1 / ACTION_WEIGHT[gt_action]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                else:
+                    action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
@@ -938,7 +953,8 @@ class RecursiveTransformer(nn.Module):
                 cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+            
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss
-            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
-            # caption_loss += snt_loss
+            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
+        caption_loss /= idx
         return caption_loss, prediction_scores_list
