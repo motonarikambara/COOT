@@ -1,6 +1,5 @@
 """
 Train captioning with MART.
-
 Originally published by https://github.com/jayleicn/recurrent-transformer under MIT license
 Reworked by https://github.com/gingsi/coot-videotext under Apache 2 license
 """
@@ -17,6 +16,8 @@ from nntrainer import arguments, utils
 from nntrainer.utils_torch import set_seed
 from nntrainer.utils_yaml import load_yaml_config_file
 import datetime
+from nntrainer.metric import TEXT_METRICS
+from nntrainer.view_results import collect_results_data, output_results, update_performance_profile
 
 
 EXP_TYPE = ExperimentTypesConst.CAPTION
@@ -57,7 +58,7 @@ def main():
     set_seed(cfg.random_seed, cudnn_deterministic=cfg.cudnn_deterministic, cudnn_benchmark=cfg.cudnn_benchmark)
 
     # create dataset
-    train_set, val_set, train_loader, val_loader = create_mart_datasets_and_loaders(
+    train_set, val_set, train_loader, val_loader, test_set, test_loader = create_mart_datasets_and_loaders(
         cfg, args.coot_feat_dir, args.annotations_dir, args.video_feature_dir)
 
     # run_number: run name
@@ -91,7 +92,27 @@ def main():
             trainer.validate_epoch(val_loader)
         else:
             # run training
-            trainer.train_model(train_loader, val_loader)
+            trainer.train_model(train_loader, val_loader, test_loader)
+            # run_name = "yc2_100m_coot_clip_mart_" + run_name
+            # print("RUN_NAME*******************************")
+            # print(run_name)
+            # print("***************************************")
+            # exp_groups_names = {"default": []}
+            # exp_groups_names["default"].append(run_name)
+            # # exp_groups_names = utils.match_folder(args.log_dir, EXP_TYPE, args.exp_group, args.exp_list, args.search)
+            # collector = collect_results_data(
+            #     EXP_TYPE, exp_groups_names, log_dir="experiments", read_last_epoch=False, add_group=False)
+            # print(collector)
+            # collector = update_performance_profile(collector)
+
+
+            # # ---------- Define which metrics to print ----------
+            # default_metrics = []
+            # default_fields = ["bleu4", "meteo", "rougl", "cider", "re4"]
+            # output_results(collector, custom_metrics=TEXT_METRICS, metrics="", default_metrics=default_metrics,
+            #             fields="", default_fields=default_fields, mean=False, mean_all=False,
+            #             sort="score", sort_asc=False,
+            #             compact=False)
 
         # done with this round
         trainer.close()

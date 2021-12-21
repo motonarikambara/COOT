@@ -273,7 +273,7 @@ class BaseTrainer:
             return True
         return False
 
-    def check_early_stop(self) -> bool:
+    def check_early_stop(self, val_diff) -> bool:
         """
         Check if training should be stopped at this point.
 
@@ -292,7 +292,8 @@ class BaseTrainer:
         # log infos
         self.logger.info(f"Experiment ---------- {self.exp.exp_group}/{self.exp.exp_name}/{self.exp.run_name} "
                          f"---------- epoch current/best/bad: {current_epoch}/{best_epoch}/{bad_epochs}")
-        if bad_epochs >= self.cfg.val.det_best_terminate_after:
+        # if bad_epochs >= self.cfg.val.det_best_terminate_after:
+        if val_diff <= 5:
             # stop early
             self.logger.info(f"No improvement since {bad_epochs} epochs, end of training.")
             return True

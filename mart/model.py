@@ -780,4 +780,5 @@ class RecursiveTransformer(nn.Module):
             for idx in range(step_size):
                 caption_loss +=  self.loss_func(prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                                                input_labels_list[idx].view(-1))
+            caption_loss /= step_size
             return caption_loss, prediction_scores_list
