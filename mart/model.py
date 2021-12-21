@@ -728,7 +728,7 @@ class RecursiveTransformer(nn.Module):
 
     #ver. future
     def forward(self, input_ids_list, video_features_list, input_masks_list,
-                token_type_ids_list, input_labels_list, return_memory=False):
+                token_type_ids_list, input_labels_list, gt_clip, return_memory=False):
         """
         Args:
             input_ids_list: [(N, L)] * step_size
