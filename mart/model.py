@@ -21,7 +21,7 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-ACTION_WEIGHT = {"7": 254, "9": 57}
+ACTION_WEIGHT = {7: 254, 9: 57}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
@@ -765,6 +765,7 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
+        self.cfg.vocab_size = 216
         self.z_f = torch.randn(1, requires_grad=True).cuda()
         self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
@@ -784,6 +785,7 @@ class RecursiveTransformer(nn.Module):
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
         self.size_adjust = nn.Linear(512, 384)
@@ -933,14 +935,16 @@ class RecursiveTransformer(nn.Module):
                 input_labels_list[idx].view(-1),
             )
             gt_action_list = input_labels_list[idx][:, 3]
+            # print(gt_action_list)
             act_score_list = action_score[idx].cpu()
+            # print(act_score_list)
             action_loss = 0.0
             for actidx in range(len(gt_action_list)):
                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
                 if gt_action_list[actidx] == -1:
                     continue
                 if gt_action[0] in ACTION_WEIGHT:
-                    action_loss += (1 / ACTION_WEIGHT[gt_action]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (1 / ACTION_WEIGHT[gt_action[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
