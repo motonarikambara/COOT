@@ -954,7 +954,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.logger.info(
             f"Done with translation, epoch {self.state.current_epoch} split {eval_mode}"
         )
-        wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
+        wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
         self.test_metrics = TRANSLATION_METRICS_LOG
         self.higest_test = flat_metrics
         self.logger.info(
