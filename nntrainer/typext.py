@@ -65,7 +65,8 @@ class SaveableBaseModel(BaseModel):
             file: Target json file.
         """
         try:
-            json.dump(self.dict(), Path(file).open("wt", encoding="utf8"))
+            print("Json dump")
+            # json.dump(self.dict(), Path(file).open("wt", encoding="utf8"))
         except TypeError as e:
             # something in the object is probably not JSON serializable.
             print("---------- JSON encoding error! ----------")

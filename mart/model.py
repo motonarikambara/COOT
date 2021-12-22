@@ -935,16 +935,15 @@ class RecursiveTransformer(nn.Module):
                 input_labels_list[idx].view(-1),
             )
             gt_action_list = input_labels_list[idx][:, 3]
-            # print(gt_action_list)
             act_score_list = action_score[idx].cpu()
-            # print(act_score_list)
             action_loss = 0.0
             for actidx in range(len(gt_action_list)):
                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
-                if gt_action_list[actidx] == -1:
+                gt_idx = gt_action.tolist()
+                if gt_idx[0] == -1:
                     continue
-                if gt_action[0] in ACTION_WEIGHT:
-                    action_loss += (1 / ACTION_WEIGHT[gt_action[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                if gt_idx[0] in ACTION_WEIGHT:
+                    action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
@@ -957,7 +956,8 @@ class RecursiveTransformer(nn.Module):
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             
-            # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss
+            # caption_loss += 0.9 * snt_loss
             caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
-        caption_loss /= idx
+            # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
+        caption_loss /= step_size
         return caption_loss, prediction_scores_list
