@@ -302,7 +302,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="tmp", project="mart")
+        wandb.init(name="clip_only baseline", project="mart")
         valloss_diff = 1000.0
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
@@ -312,6 +312,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             # if self.check_early_stop(valloss_diff):
             #     break
             self.hook_pre_train_epoch()  # pre-epoch hook: set models to train, time book-keeping
+            batch_loss = 0.0
+            num_steps = 0
 
             # check exponential moving average
             if (
@@ -385,7 +387,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                             future_clip,
                         )
                         self.train_steps += 1
-                        wandb.log({"train_loss": loss}, step=self.train_steps)
+                        num_steps += 1
+                        batch_loss += loss
                         
 
                 self.hook_post_forward_step_timer()  # hook for step timing
@@ -451,6 +454,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             accuracy = 1.0 * n_word_correct / n_word_total
             self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
             self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
+            batch_loss /= num_steps
+            wandb.log({"train_loss": batch_loss})
             # return loss_per_word, accuracy
 
             # ---------- validation ----------
@@ -462,11 +467,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                 _val_loss, _val_score, is_best, _metrics, valloss_diff = self.validate_epoch(
                     val_loader
                 )
-                if is_best:
-                    print("#############################################")
-                    print("Do test")
-                    self.test_epoch(test_loader)
-                    print("###################################################")
+                # if is_best:
+                print("#############################################")
+                print("Do test")
+                self.test_epoch(test_loader)
+                print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
