@@ -335,6 +335,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             total_loss = 0
             n_word_total = 0
             n_word_correct = 0
+            num_steps = 0
+            batch_loss = 0.0
 
             # ---------- Data　loader Iteration ----------
             for step, batch in enumerate(tqdm(train_loader)):
@@ -389,7 +391,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                         gt_clip
                     )
                     self.train_steps += 1
-                    wandb.log({"train_loss": loss}, step=self.train_steps)
+                    num_steps += 1
+                    batch_loss += loss
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -455,6 +458,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
             self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
             # return loss_per_word, accuracy
+            batch_loss /= num_steps
+            wandb.log({"train_loss": batch_loss})
 
             # ---------- validation ----------
             do_val = self.check_is_val_epoch()
@@ -465,11 +470,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                 _val_loss, _val_score, is_best, _metrics = self.validate_epoch(
                     val_loader
                 )
-                if is_best:
-                    print("#############################################")
-                    print("Do test")
-                    self.test_epoch(test_loader)
-                    print("###################################################")
+                # if is_best:
+                print("#############################################")
+                print("Do test")
+                self.test_epoch(test_loader)
+                print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
