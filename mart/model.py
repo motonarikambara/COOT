@@ -279,9 +279,11 @@ class Intermediate(nn.Module):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
         self.intermediate_act_fn = gelu
+        self.drop = nn.Dropout(0.2)
 
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
+        hidden_states = self.drop(hidden_states)
         hidden_states = self.intermediate_act_fn(hidden_states)
         return hidden_states
 
@@ -463,7 +465,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=5):
+    def __init__(self, cfg, num_hidden_layers=6):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -500,6 +502,7 @@ class TrmEncLayer(nn.Module):
         # self.attention = Attention(cfg, m=3)
         self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
+        self.batchnorm = nn.BatchNorm1d(3)
 
     def forward(self, x):
         """
@@ -511,12 +514,14 @@ class TrmEncLayer(nn.Module):
         target = x[:, 1, :].clone()
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
+        # x = self.attention(x)
+        # x = self.batchnorm(x)
         x = self.output(x, x)  # (N, L, D)
         return x
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=3):
+    def __init__(self, cfg, num_layers=1):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=cfg.hidden_size)
@@ -524,7 +529,8 @@ class TimeSeriesEncoder(nn.Module):
             [TrmEncLayer(cfg) for _ in range(num_layers)]
         )
         self.ff = TrmFeedForward(self.cfg)
-        self.layernorm = nn.LayerNorm((cfg.hidden_size))
+        self.drop = nn.Dropout(0.2)
+        self.norm = nn.BatchNorm1d(3)
 
     def forward(self, x):
         x = self.pe(x)
@@ -532,6 +538,7 @@ class TimeSeriesEncoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, res)
+        x = self.drop(x)
         # x = x + res
         # x = self.layernorm(x)
         return x
@@ -758,7 +765,7 @@ class TimeSeriesMoudule(nn.Module):
         # for layer in self.TSlayers:
         #     ts_feats = layer(ts_feats)
         # ts_feats = self.expand(ts_feats)
-        ts_feats = self.z * x + (1 - self.z) * ts_feats
+        # ts_feats = self.z * x + (1 - self.z) * ts_feats
         ts_feats = self.expand(ts_feats)
         # ts_feats = self.conv(ts_feats)
         tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
@@ -780,7 +787,7 @@ class AttentionBranchNetwork(nn.Module):
         att = self.sigmoid(att)
         att = torch.mul(att, feat)
         att = att + feat
-        att = self.z * att + (1 - self.z) * feat
+        # att = self.z * att + (1 - self.z) * feat
         return att[:, 1, :].reshape((-1, 1, self.cfg.hidden_size))
 
 
@@ -818,13 +825,14 @@ class RecursiveTransformer(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
             nn.Linear(input_size, input_size),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
             nn.ReLU(),
-            nn.Linear(input_size, input_size)
+            nn.Dropout(0.2),
+            nn.Linear(input_size, input_size),
         )
         # self.abn = AttentionBranchNetwork(cfg)
         self.future_loss = nn.MSELoss()
@@ -953,7 +961,6 @@ class RecursiveTransformer(nn.Module):
             action_score.append(prediction_scores[:, 3, :])
         # compute loss, get predicted words
         caption_loss = 0.0
-        action_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
@@ -961,24 +968,28 @@ class RecursiveTransformer(nn.Module):
             )
             gt_action_list = input_labels_list[idx][:, 3]
             act_score_list = action_score[idx].cpu()
+            action_loss = 0.0
             for actidx in range(len(gt_action_list)):
                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
-                if gt_action_list[actidx] == -1:
+                gt_idx = gt_action.tolist()
+                if gt_idx[0] == -1:
                     continue
-                if gt_action[0] in ACTION_WEIGHT:
-                    action_loss += (1/ ACTION_WEIGHT[gt_action]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                if gt_idx[0] in ACTION_WEIGHT:
+                    action_loss += (1/ ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
                     action_loss += (1/ 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
-            cont_loss = 1.0
+            cont_loss = 0.0
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
-            # for i in range(1, len(tmp_pred_score_list)):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            # for i in range(0, len(tmp_pred_score_list) - 1):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            for i in range(1, len(tmp_pred_score_list)):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            for i in range(0, len(tmp_pred_score_list) - 1):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
+                1.0 * snt_loss + 0.01 * fut_loss + 0.01 * (1.0 / cont_loss) + 10 * action_loss
+                # 1.0 * snt_loss + 0.01 * fut_loss - 0.01 * cont_loss + 0.01 * action_loss
+                # 1.0 * snt_loss + 1 * fut_loss + 1 * (1.0 / cont_loss) + 1 * action_loss
         caption_loss /= step_size
             # caption_loss += snt_loss
         return caption_loss, prediction_scores_list
