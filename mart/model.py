@@ -517,15 +517,12 @@ class TimeSeriesEncoder(nn.Module):
         self.pe = PositionEncoding(n_filters=384)
         self.layers = nn.ModuleList([TrmEncLayer(self.cfg) for _ in range(num_layers)])
         self.ff = TrmFeedForward(self.cfg)
-        self.layernorm = nn.LayerNorm((384))
 
     def forward(self, x):
         x = self.pe(x)
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, x)
-        # x = x + res
-        # x = self.layernorm(x)
         return x
 
 
@@ -601,10 +598,8 @@ class EmbeddingsWithVideo(nn.Module):
         words_embeddings = self.word_fc(self.word_embeddings(input_ids))
         video_embeddings = self.video_embeddings(video_features)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-        # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
         words_embeddings += token_type_embeddings
         embeddings = words_embeddings + video_embeddings + token_type_embeddings
-        # embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
 
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
@@ -618,7 +613,6 @@ class PredictionHeadTransform(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        # self.transform_act_fn = gelu
         self.gelu = nn.GELU()
         self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
@@ -681,14 +675,10 @@ class RelationalSelfAttention(nn.Module):
         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        # self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        # self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.h =\
             torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        # self.g = nn.Linear(m, cfg.hidden_size)
         self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-# self.context_hidden_change = nn.Linear(m, cfg.hidden_size)
         self.one = torch.ones((m, 1)).cuda()
 
     def forward(self, target, cont):
@@ -716,11 +706,6 @@ class RelationalSelfAttention(nn.Module):
         x_nr = torch.matmul(value, _xg)
         context = x_nr + value
 
-        # fusion
-        # context = torch.transpose(context, 1, 2)
-        # context = self.context_hidden_change(context)
-        # print(kernel.shape)
-        # print(context.shape)
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
 
         return output
@@ -733,12 +718,8 @@ class TimeSeriesMoudule(nn.Module):
         self.cfg = cfg
         self.cfg.hidden_size = 384
         self.hidden_size = 768
-        # self.TSlayers =\
-        #     nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
-        # self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
-        # self.conv = nn.Conv1d(3, 1, 1)
         self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
         self.z = torch.randn(1, requires_grad=True).cuda()
@@ -746,17 +727,10 @@ class TimeSeriesMoudule(nn.Module):
     def forward(self, x):
         ts_feats = x.clone().cuda()
         ts_feats = self.TSEncoder(ts_feats)
-        # for layer in self.TSlayers:
-        #     ts_feats = layer(ts_feats)
-        # ts_feats = self.expand(ts_feats)
         ts_feats = self.z * x + (1 - self.z) * ts_feats
         ts_feats = self.expand(ts_feats)
-        # ts_feats = self.conv(ts_feats)
         tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
         tmp_feats = self.layernorm(tmp_feats)
-        # x = x + ts_feats
-        # x = self.dense(x)
-        # x = self.layernorm(x)
         return ts_feats, tmp_feats
 
 
@@ -852,8 +826,6 @@ class RecursiveTransformer(nn.Module):
 
         # Time Series Module
         _, clip_feats = self.TSModule(clip_feats)
-        # ts_feats.view((-1, 1, self.cfg.hidden_size))
-        # video_features[:, 1:4, :] = clip_feats
 
         embeddings = self.embeddings(
             input_ids, video_features, token_type_ids

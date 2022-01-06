@@ -60,8 +60,6 @@ def main():
     train_set, val_set, train_loader, val_loader, test_set, test_loader = create_mart_datasets_and_loaders(
         cfg, args.coot_feat_dir, args.annotations_dir, args.video_feature_dir)
 
-    # run_number: run name
-    # for i, run_number in enumerate(range(args.start_run, args.start_run + args.num_runs)):
     for i in range(args.start_run):
         run_number = datetime.datetime.now()
         run_name = f"{args.run_name}{run_number}"
