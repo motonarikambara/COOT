@@ -310,7 +310,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             val_loader: Validation dataloader.
         """
         loss_delta = 1000.0
-        wandb.init(name="tmp", project="mart")
+        wandb.init(name="ours", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -475,10 +475,10 @@ class MartTrainer(trainer_base.BaseTrainer):
                     val_loader
                 )
                 # if is_best:
-                print("#############################################")
-                print("Do test")
-                self.test_epoch(test_loader)
-                print("###################################################")
+            print("#############################################")
+            print("Do test")
+            self.test_epoch(test_loader)
+            print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)

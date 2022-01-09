@@ -279,11 +279,9 @@ class Intermediate(nn.Module):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
         self.intermediate_act_fn = gelu
-        self.drop = nn.Dropout(0.2)
 
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
-        hidden_states = self.drop(hidden_states)
         hidden_states = self.intermediate_act_fn(hidden_states)
         return hidden_states
 
@@ -465,14 +463,11 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=6):
+    def __init__(self, cfg, num_hidden_layers=3):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
         )
-        # self.layer = nn.ModuleList(
-        #     [RelationalSelfAttention(cfg) for _ in range(num_hidden_layers)]
-        # )
 
     def forward(self, hidden_states, attention_mask, clip_his):
         """
@@ -502,7 +497,8 @@ class TrmEncLayer(nn.Module):
         # self.attention = Attention(cfg, m=3)
         self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
-        self.batchnorm = nn.BatchNorm1d(3)
+        # self.batchnorm = nn.BatchNorm1d(3)
+        self.layernorm = nn.LayerNorm(384)
 
     def forward(self, x):
         """
@@ -514,14 +510,13 @@ class TrmEncLayer(nn.Module):
         target = x[:, 1, :].clone()
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
-        # x = self.attention(x)
-        # x = self.batchnorm(x)
         x = self.output(x, x)  # (N, L, D)
+        x = self.layernorm(x)
         return x
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=1):
+    def __init__(self, cfg, num_layers=3):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=cfg.hidden_size)
@@ -529,8 +524,7 @@ class TimeSeriesEncoder(nn.Module):
             [TrmEncLayer(cfg) for _ in range(num_layers)]
         )
         self.ff = TrmFeedForward(self.cfg)
-        self.drop = nn.Dropout(0.2)
-        self.norm = nn.BatchNorm1d(3)
+        self.norm = nn.LayerNorm(384)
 
     def forward(self, x):
         x = self.pe(x)
@@ -538,9 +532,7 @@ class TimeSeriesEncoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, res)
-        x = self.drop(x)
-        # x = x + res
-        # x = self.layernorm(x)
+        x = self.norm(x)
         return x
 
 
@@ -698,15 +690,12 @@ class RelationalSelfAttention(nn.Module):
         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        # self.p = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        # self.h = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.h =\
             torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        # self.g = nn.Linear(m, cfg.hidden_size)
         self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        # self.context_hidden_change = nn.Linear(m, cfg.hidden_size)
         self.one = torch.ones((m, 1)).cuda()
+        self.layernorm = LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
         query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
@@ -722,9 +711,6 @@ class RelationalSelfAttention(nn.Module):
         x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
         kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
         kernel = kernel_v + kernel_r
-
-        # basic context
-        # basic_cont = context.clone()
         
         # relational context
         xg = value.clone()
@@ -734,11 +720,8 @@ class RelationalSelfAttention(nn.Module):
         context = x_nr + value
 
         # fusion
-        # context = torch.transpose(context, 1, 2)
-        # context = self.context_hidden_change(context)
-        # print(kernel.shape)
-        # print(context.shape)
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+        output = self.layernorm(output)
 
         return output
 
@@ -749,46 +732,50 @@ class TimeSeriesMoudule(nn.Module):
         self.cfg = cfg
         self.cfg.hidden_size = 384
         self.hidden_size = 768
-        # self.TSlayers =\
-        #     nn.ModuleList([TimeSeriesEncoder(self.cfg) for _ in range(num_layers)])
-        # self.dense = nn.Linear(self.cfg.hidden_size, self.cfg.hidden_size)
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
-        # self.conv = nn.Conv1d(3, 1, 1)
         self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
-        self.z = torch.randn(1, requires_grad=True).cuda()
+        # self.z = torch.randn(1, requires_grad=True).cuda()
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
         ts_feats = self.TSEncoder(ts_feats)
-        # for layer in self.TSlayers:
-        #     ts_feats = layer(ts_feats)
-        # ts_feats = self.expand(ts_feats)
-        # ts_feats = self.z * x + (1 - self.z) * ts_feats
         ts_feats = self.expand(ts_feats)
-        # ts_feats = self.conv(ts_feats)
         tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
         tmp_feats = self.layernorm(tmp_feats)
-        # x = x + ts_feats
-        # x = self.dense(x)
-        # x = self.layernorm(x)
         return ts_feats, tmp_feats
 
 
-class AttentionBranchNetwork(nn.Module):
-    def __init__(self, cfg):
+class CLIPloss(nn.Module):
+    """
+    CLIPで用いられているloss
+    https://cdn.openai.com/papers/Learning_Transferable_Visual_Models_From_Natural_Language_Supervision.pdf
+    """
+    def __init__(self):
         super().__init__()
-        self.cfg = cfg
-        self.sigmoid = nn.Sigmoid()
-        self.z = torch.randn(1, requires_grad=True).cuda()
+        self.w = nn.Linear(25 * 768, 384)
+        self.t = torch.randn(1, requires_grad=True).cuda()
+        self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
+        self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
+        self.norm_i = nn.LayerNorm(384)
+        self.norm_t = nn.LayerNorm(384)
+    
+    def forward(self, clip, text):
+        text = torch.flatten(text, 1)
+        text = self.w(text)
+        i_e = self.norm_i(clip)
+        t_e = self.norm_t(text)
+        logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
+        # print(logits)
+        # sys.exit()
+        n = i_e.shape[0]
+        labels = torch.arange(n, device=torch.device("cuda"))
+        loss_i = self.i_loss(logits, labels)
+        loss_t = self.t_loss(logits, labels)
+        cliploss = (loss_i + loss_t) / 2
+        return cliploss
 
-    def forward(self, att, feat):
-        att = self.sigmoid(att)
-        att = torch.mul(att, feat)
-        att = att + feat
-        # att = self.z * att + (1 - self.z) * feat
-        return att[:, 1, :].reshape((-1, 1, self.cfg.hidden_size))
 
 
 # MART model
@@ -808,15 +795,14 @@ class RecursiveTransformer(nn.Module):
         )
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
         self.transformerdecoder = Decoder(cfg)
-        # self.transformerdecoder_2 = Decoder(cfg)
-        # # self.transformerdecoder_3 = Decoder(cfg)
         if self.cfg.label_smoothing != 0:
             self.loss_func = LabelSmoothingLoss(
                 cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
             )
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        # self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.cliploss = CLIPloss()
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
@@ -825,16 +811,13 @@ class RecursiveTransformer(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
-            nn.Dropout(0.2),
             nn.Linear(input_size, input_size),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
             nn.ReLU(),
-            nn.Dropout(0.2),
             nn.Linear(input_size, input_size),
         )
-        # self.abn = AttentionBranchNetwork(cfg)
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
@@ -878,43 +861,25 @@ class RecursiveTransformer(nn.Module):
         vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
         past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-
-        # clip_feats = self.ff(clip_feats)
-        # clip_feats[:, 2, :] = pred_future.clone()
+        
         video_features[:, 1:4, :] = vid_feats.clone()
-
         # Time Series Module
         ts_feats, ts_feat = self.TSModule(clip_feats)
-        # abn_att = torch.zeros(ts_feats.shape).cuda()
-        # abn_att = abn_att + ts_feat
-        # ts_feats.view((-1, 1, self.cfg.hidden_size))
-        # video_features[:, 1:4, :] = clip_feats
 
         embeddings = self.embeddings(
             input_ids, video_features, token_type_ids
         )  # (N, L, D)
-        # clip_his = torch.zeros((embeddings.shape)).cuda()
-        # clip_his = clip_his + ts_feats
         encoded_layer_outputs = self.encoder(
             embeddings, input_masks, output_all_encoded_layers=False
         )  # both outputs are list
         decoded_layer_outputs = self.transformerdecoder(
             encoded_layer_outputs[-1], input_masks, ts_feat
         )
-        # ts_feat = self.abn(abn_att, ts_feats)
-        # decoded_layer_outputs = self.transformerdecoder_2(
-        #     decoded_layer_outputs[-1], input_masks, ts_feat
-        # )
-        # ts_feat = self.abn(abn_att, ts_feats)
-        # decoded_layer_outputs = self.transformerdecoder_3(
-        #     decoded_layer_outputs[-1], input_masks, ts_feat
-        # )
 
         prediction_scores = self.decoder(
-            decoded_layer_outputs[-1]
+            decoded_layer_outputs[-1] # (batch_size, 25, 768)
         )  # (N, L, vocab_size)
-        return encoded_layer_outputs, prediction_scores, future_b
-        # return encoded_layer_outputs, prediction_scores
+        return decoded_layer_outputs[-1], prediction_scores, future_b
 
     # ver. future
     def forward(
@@ -941,13 +906,14 @@ class RecursiveTransformer(nn.Module):
         """
         # [(N, M, D)] * num_hidden_layers, initialized internally
         step_size = len(input_ids_list)
-        encoded_outputs_list = []  # [(N, L, D)] * step_size
+        decoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         action_score = []
         future_rec = []
         future_gt = []
+        video_feat_list = []
         for idx in range(step_size):
-            encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+            decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
                 input_ids_list[idx],
                 video_features_list[idx],
                 input_masks_list[idx],
@@ -956,8 +922,9 @@ class RecursiveTransformer(nn.Module):
             )
             future_gt.append(gt_clip[idx][:, 1, :])
             future_rec.append(pred_future)
-            encoded_outputs_list.append(encoded_layer_outputs)
+            decoded_outputs_list.append(decoded_layer_outputs)
             prediction_scores_list.append(prediction_scores)
+            video_feat_list.append(video_features_list[idx][:, 1, :])
             action_score.append(prediction_scores[:, 3, :])
         # compute loss, get predicted words
         caption_loss = 0.0
@@ -975,21 +942,20 @@ class RecursiveTransformer(nn.Module):
                 if gt_idx[0] == -1:
                     continue
                 if gt_idx[0] in ACTION_WEIGHT:
-                    action_loss += (1/ ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
-                    action_loss += (1/ 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (1 / 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
-            tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
-            tmp_idx_list = input_labels_list[idx].view(-1)
-            for i in range(1, len(tmp_pred_score_list)):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            for i in range(0, len(tmp_pred_score_list) - 1):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
+            # tmp_idx_list = input_labels_list[idx].view(-1)
+            # for i in range(1, len(tmp_pred_score_list)):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            # for i in range(0, len(tmp_pred_score_list) - 1):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            cont_loss += self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                1.0 * snt_loss + 0.01 * fut_loss + 0.01 * (1.0 / cont_loss) + 10 * action_loss
-                # 1.0 * snt_loss + 0.01 * fut_loss - 0.01 * cont_loss + 0.01 * action_loss
-                # 1.0 * snt_loss + 1 * fut_loss + 1 * (1.0 / cont_loss) + 1 * action_loss
+                1.0 * snt_loss + 0.1 * fut_loss + cont_loss + 10 * action_loss
+                # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
         caption_loss /= step_size
-            # caption_loss += snt_loss
         return caption_loss, prediction_scores_list
