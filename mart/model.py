@@ -21,7 +21,7 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-ACTION_WEIGHT = {7: 254, 9: 57}
+ACTION_WEIGHT = {7: 636, 9: 133}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
@@ -135,22 +135,22 @@ class PositionEncoding(nn.Module):
         return x
 
 
-class LayerNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-12):
-        """
-        Construct a layernorm module in the TF style
-        (epsilon inside the square root).
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.bias = nn.Parameter(torch.zeros(hidden_size))
-        self.variance_epsilon = eps
+# class LayerNorm(nn.Module):
+#     def __init__(self, hidden_size, eps=1e-12):
+#         """
+#         Construct a layernorm module in the TF style
+#         (epsilon inside the square root).
+#         """
+#         super().__init__()
+#         self.weight = nn.Parameter(torch.ones(hidden_size))
+#         self.bias = nn.Parameter(torch.zeros(hidden_size))
+#         self.variance_epsilon = eps
 
-    def forward(self, x):
-        u = x.mean(-1, keepdim=True)
-        s = (x - u).pow(2).mean(-1, keepdim=True)
-        x = (x - u) / torch.sqrt(s + self.variance_epsilon)
-        return self.weight * x + self.bias
+#     def forward(self, x):
+#         u = x.mean(-1, keepdim=True)
+#         s = (x - u).pow(2).mean(-1, keepdim=True)
+#         x = (x - u) / torch.sqrt(s + self.variance_epsilon)
+#         return self.weight * x + self.bias
 
 
 class SelfAttention(nn.Module):
@@ -234,7 +234,7 @@ class SelfOutput(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -293,7 +293,7 @@ class Output(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.intermediate_size, cfg.hidden_size)
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -369,7 +369,7 @@ class TrmFeedForward(nn.Module):
         super().__init__()
         self.dense_f = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
         self.dense_s = nn.Linear(cfg.intermediate_size, cfg.hidden_size)
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -548,18 +548,18 @@ class EmbeddingsWithVideo(nn.Module):
             cfg.vocab_size, cfg.word_vec_size, padding_idx=0
         )
         self.word_fc = nn.Sequential(
-            LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
             nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.word_vec_size, cfg.hidden_size),
             nn.ReLU(True),
-            LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
         self.video_embeddings = nn.Sequential(
-            LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
             # nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.video_feature_size, cfg.hidden_size),
             nn.ReLU(True),
-            LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
 
         if self.add_postion_embeddings:
@@ -570,7 +570,7 @@ class EmbeddingsWithVideo(nn.Module):
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def set_pretrained_embedding(self, pretrained_embedding, freeze=True):
@@ -614,7 +614,7 @@ class PredictionHeadTransform(nn.Module):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.gelu = nn.GELU()
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
     def forward(self, hidden_states):
         """
@@ -739,7 +739,7 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
-        self.cfg.vocab_size = 216
+        self.cfg.vocab_size = 252
         self.z_f = torch.randn(1, requires_grad=True).cuda()
         self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
@@ -790,7 +790,7 @@ class RecursiveTransformer(nn.Module):
             # which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
-        elif isinstance(module, LayerNorm):
+        elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
         if isinstance(module, nn.Linear) and module.bias is not None:
