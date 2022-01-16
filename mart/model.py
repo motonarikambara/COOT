@@ -493,7 +493,8 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = RelationalSelfAttention(cfg)
+        # self.attention = RelationalSelfAttention(cfg)
+        self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
 
     def forward(self, x):
@@ -502,10 +503,11 @@ class TrmEncLayer(nn.Module):
             x: (N, L, D)
         Returns:
         """
-        tmp_x = x.clone()
-        target = x[:, 1, :].clone()
-        target = self.attention(target, tmp_x)
-        x[:, 1, :] = target.clone()
+        # tmp_x = x.clone()
+        # target = x[:, 1, :].clone()
+        # target = self.attention(target, tmp_x)
+        # x[:, 1, :] = target.clone()
+        x = self.attention(x)
         x = self.output(x, x)  # (N, L, D)
         return x
 
