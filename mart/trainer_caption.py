@@ -294,7 +294,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         if self.load_model or cfg.ema_decay <= 0:
             self.ema = None
 
-        self.beforeloss = 0.0
+        self.beforeloss = 1000.0
         self.train_steps = 0
         self.val_steps = 0
         self.test_steps = 0
@@ -309,14 +309,15 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="tmp", project="mart")
+        loss_delta = 1000.0
+        wandb.init(name="ours", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
         # ---------- Epoch Loop ----------
         for _epoch in tqdm(range(self.state.current_epoch, self.cfg.train.num_epochs)):
-            if self.check_early_stop():
-                break
+            # if self.check_early_stop(loss_delta):
+            #     break
             self.hook_pre_train_epoch()  # pre-epoch hook: set models to train, time book-keeping
 
             # check exponential moving average
@@ -334,6 +335,8 @@ class MartTrainer(trainer_base.BaseTrainer):
             total_loss = 0
             n_word_total = 0
             n_word_correct = 0
+            num_steps = 0
+            train_loss = 0.0
 
             # ---------- Data　loader Iteration ----------
             for step, batch in enumerate(tqdm(train_loader)):
@@ -391,7 +394,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                             future_clip,
                         )
                         self.train_steps += 1
-                        wandb.log({"train_loss": loss}, step=self.train_steps)
+                        num_steps += 1
+                        train_loss += loss
                         
 
                 self.hook_post_forward_step_timer()  # hook for step timing
@@ -453,6 +457,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                 )
 
             # log train statistics
+            train_loss /= num_steps
+            wandb.log({"train_loss": train_loss})
             loss_per_word = 1.0 * total_loss / n_word_total
             accuracy = 1.0 * n_word_correct / n_word_total
             self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
@@ -465,14 +471,14 @@ class MartTrainer(trainer_base.BaseTrainer):
             is_best = False
             if do_val:
                 # run validation including with ground truth tokens and translation without any text
-                _val_loss, _val_score, is_best, _metrics = self.validate_epoch(
+                _val_loss, _val_score, is_best, _metrics, loss_delta = self.validate_epoch(
                     val_loader
                 )
-                if is_best:
-                    print("#############################################")
-                    print("Do test")
-                    self.test_epoch(test_loader)
-                    print("###################################################")
+                # if is_best:
+            print("#############################################")
+            print("Do test")
+            self.test_epoch(test_loader)
+            print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
@@ -645,10 +651,9 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar.close()
         self.val_steps += 1
         batch_loss /= batch_idx
-        loss_delta = abs(self.beforeloss - batch_loss)
+        loss_delta = self.beforeloss - batch_loss
         wandb.log({"val_loss_diff": loss_delta})
         wandb.log({"val_loss": batch_loss})
-        self.beforeloss = batch_loss
 
         # ---------- validation done ----------
 
@@ -732,7 +737,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             # print(flat_metrics)
             # val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
             # val_score = flat_metrics["CIDEr"]
-            val_score = -1 * batch_loss
+            val_score = batch_loss
         else:
             raise NotImplementedError(
                 f"best field {self.cfg.val.det_best_field} not known"
@@ -740,8 +745,9 @@ class MartTrainer(trainer_base.BaseTrainer):
 
         # check for a new best epoch and update validation results
         # is_best = self.check_is_new_best(val_score)
-        is_best = self.check_is_new_best(loss_delta)
+        is_best = self.check_is_new_best(val_score, self.beforeloss)
         self.hook_post_val_epoch(loss_per_word, is_best)
+        self.beforeloss = batch_loss
 
         if self.is_test:
             # for test runs, save the validation results separately to a file
@@ -774,7 +780,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                     json.dump(metrics_data, metrics_file.open("wt", encoding="utf8"))
                     self.logger.info(f"Updated meteor in file {metrics_file}")
 
-        return total_loss, val_score, is_best, flat_metrics
+        return total_loss, val_score, is_best, flat_metrics, loss_delta
 
 
     @th.no_grad()

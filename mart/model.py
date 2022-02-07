@@ -497,7 +497,8 @@ class TrmEncLayer(nn.Module):
         self.attention = Attention(cfg, m=3)
         # self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
-        self.batchnorm = nn.BatchNorm1d(3)
+        # self.batchnorm = nn.BatchNorm1d(3)
+        self.layernorm = nn.LayerNorm(384)
 
     def forward(self, x):
         """
@@ -512,6 +513,7 @@ class TrmEncLayer(nn.Module):
         # x[:, 1, :] = target.clone()
         x = self.attention(x)
         x = self.output(x, x)  # (N, L, D)
+        x = self.layernorm(x)
         return x
 
 
@@ -524,7 +526,7 @@ class TimeSeriesEncoder(nn.Module):
             [TrmEncLayer(cfg) for _ in range(num_layers)]
         )
         self.ff = TrmFeedForward(self.cfg)
-        self.norm = nn.BatchNorm1d(3)
+        self.norm = nn.LayerNorm(384)
 
     def forward(self, x):
         x = self.pe(x)
@@ -532,6 +534,7 @@ class TimeSeriesEncoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, res)
+        x = self.norm(x)
         return x
 
 
@@ -735,7 +738,7 @@ class TimeSeriesMoudule(nn.Module):
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
-        self.z = torch.randn(1, requires_grad=True).cuda()
+        # self.z = torch.randn(1, requires_grad=True).cuda()
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
@@ -757,12 +760,14 @@ class CLIPloss(nn.Module):
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
+        self.norm_i = nn.LayerNorm(384)
+        self.norm_t = nn.LayerNorm(384)
     
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
         text = self.w(text)
-        i_e = torch.linalg.norm(clip, keepdim=True)
-        t_e = torch.linalg.norm(text, keepdim=True)
+        i_e = self.norm_i(clip)
+        t_e = self.norm_t(text)
         logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
         # print(logits)
         # sys.exit()
@@ -952,6 +957,7 @@ class RecursiveTransformer(nn.Module):
             cont_loss += self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                1.0 * snt_loss + 0.01 * fut_loss + 0.1 * cont_loss + 10 * action_loss
+                1.0 * snt_loss + 0.1 * fut_loss + cont_loss + 10 * action_loss
+                # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
