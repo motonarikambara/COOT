@@ -335,6 +335,7 @@ class Translator(object):
             bsz = len(input_ids)
             next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
             for dec_idx in range(max_v_len, max_v_len + max_t_len):
+                # 生成した語で埋める
                 input_ids[:, dec_idx] = next_symbols
                 input_masks[:, dec_idx] = 1
                 copied_prev_ms = copy.deepcopy(
@@ -350,6 +351,7 @@ class Translator(object):
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
                 # next_words = pred_scores.max(2)[1][:, dec_idx]
+                # 予測語はpred_scores[:, dec_idx]における，最も確率の高い単語
                 next_words = pred_scores[:, dec_idx].max(1)[1]
                 next_symbols = next_words
 
