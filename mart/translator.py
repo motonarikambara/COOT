@@ -201,7 +201,7 @@ class Translator(object):
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
-                _, _, pred_scores = model.forward_step(
+                _, _, pred_scores, _ = model.forward_step(
                     copied_prev_ms,
                     input_ids,
                     video_features,
@@ -257,7 +257,7 @@ class Translator(object):
             init_input_ids, init_input_masks = mask_tokens_after_eos(
                 init_input_ids, init_input_masks
             )
-            cur_ms, _, pred_scores = model.forward_step(
+            cur_ms, _, pred_scores, _ = model.forward_step(
                 init_ms,
                 init_input_ids,
                 init_video_features,
@@ -341,7 +341,7 @@ class Translator(object):
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
-                _, pred_scores, _ = model.forward_step(
+                _, pred_scores, _, _ = model.forward_step(
                     input_ids,
                     video_features,
                     input_masks,
@@ -390,98 +390,51 @@ class Translator(object):
                 dec_seq_list.append(dec_seq)
             return dec_seq_list
 
-    def translate_batch_single_sentence_greedy(
-        self,
-        input_ids,
-        video_features,
-        input_masks,
-        token_type_ids,
-        model,
-        start_idx=RCDataset.BOS,
-        unk_idx=RCDataset.UNK,
-    ):
-        """
-        The first few args are the same to the input to the forward_step func
+    # def translate_batch_single_sentence_greedy(
+    #     self,
+    #     input_ids,
+    #     video_features,
+    #     input_masks,
+    #     token_type_ids,
+    #     model,
+    #     start_idx=RCDataset.BOS,
+    #     unk_idx=RCDataset.UNK,
+    # ):
+    #     """
+    #     The first few args are the same to the input to the forward_step func
 
-        Notes:
-            1, Copy the prev_ms each word generation step, as the func will modify this value,
-            which will cause discrepancy between training and inference
-            2, After finish the current sentence generation step, replace the words generated
-            after the `[EOS]` token with `[PAD]`. The replaced input_ids should be used to generate
-            next memory state tensor.
-        """
-        input_ids, input_masks = self.prepare_video_only_inputs(
-            input_ids, input_masks, token_type_ids
-        )
-        assert (
-            torch.sum(input_masks[:, self.cfg.max_v_len + 1 :]) == 0
-        ), "Initially, all text tokens should be masked"
-        config = model.cfg
-        max_v_len = config.max_v_len
-        max_t_len = config.max_t_len
-        bsz = len(input_ids)
-        next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
-        for dec_idx in range(max_v_len, max_v_len + max_t_len):
-            input_ids[:, dec_idx] = next_symbols
-            input_masks[:, dec_idx] = 1
-            # if dec_idx < max_v_len + 5:
-            #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
-            _, pred_scores = model.forward(
-                input_ids, video_features, input_masks, token_type_ids, None
-            )
-            # suppress unk token; (N, L, vocab_size)
-            pred_scores[:, :, unk_idx] = -1e10
-            # next_words = pred_scores.max(2)[1][:, dec_idx]
-            next_words = pred_scores[:, dec_idx].max(1)[1]
-            next_symbols = next_words
-        return input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
-
-    @classmethod
-    def translate_batch_single_sentence_untied_greedy(
-        cls,
-        video_features,
-        video_masks,
-        text_input_ids,
-        text_masks,
-        text_input_labels,
-        model,
-        start_idx=RCDataset.BOS,
-        unk_idx=RCDataset.UNK,
-    ):
-        """
-        The first few args are the same to the input to the forward_step func
-
-        Notes:
-            1, Copy the prev_ms each word generation step, as the func will modify this value,
-            which will cause discrepancy between training and inference
-            2, After finish the current sentence generation step, replace the words generated
-            after the `[EOS]` token with `[PAD]`. The replaced input_ids should be used to generate
-            next memory state tensor.
-        """
-        encoder_outputs = model.encode(video_features, video_masks)  # (N, Lv, D)
-
-        config = model.cfg
-        max_t_len = config.max_t_len
-        bsz = len(text_input_ids)
-        text_input_ids = text_input_ids.new_zeros(text_input_ids.size())  # all zeros
-        text_masks = text_masks.new_zeros(text_masks.size())  # all zeros
-        next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
-        for dec_idx in range(max_t_len):
-            text_input_ids[:, dec_idx] = next_symbols
-            text_masks[:, dec_idx] = 1
-            _, pred_scores = model.decode(
-                text_input_ids,
-                text_masks,
-                text_input_labels,
-                encoder_outputs,
-                video_masks,
-            )
-            # suppress unk token; (N, L, vocab_size)
-            pred_scores[:, :, unk_idx] = -1e10
-            # next_words = pred_scores.max(2)[1][:, dec_idx]
-            next_words = pred_scores[:, dec_idx].max(1)[1]
-            next_symbols = next_words
-        return text_input_ids  # (N, Lt)
+    #     Notes:
+    #         1, Copy the prev_ms each word generation step, as the func will modify this value,
+    #         which will cause discrepancy between training and inference
+    #         2, After finish the current sentence generation step, replace the words generated
+    #         after the `[EOS]` token with `[PAD]`. The replaced input_ids should be used to generate
+    #         next memory state tensor.
+    #     """
+    #     input_ids, input_masks = self.prepare_video_only_inputs(
+    #         input_ids, input_masks, token_type_ids
+    #     )
+    #     assert (
+    #         torch.sum(input_masks[:, self.cfg.max_v_len + 1 :]) == 0
+    #     ), "Initially, all text tokens should be masked"
+    #     config = model.cfg
+    #     max_v_len = config.max_v_len
+    #     max_t_len = config.max_t_len
+    #     bsz = len(input_ids)
+    #     next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
+    #     for dec_idx in range(max_v_len, max_v_len + max_t_len):
+    #         input_ids[:, dec_idx] = next_symbols
+    #         input_masks[:, dec_idx] = 1
+    #         # if dec_idx < max_v_len + 5:
+    #         #     logger.info("prev_ms {} {}".format(type(prev_ms[0]), prev_ms[0]))
+    #         _, pred_scores = model.forward(
+    #             input_ids, video_features, input_masks, token_type_ids, None
+    #         )
+    #         # suppress unk token; (N, L, vocab_size)
+    #         pred_scores[:, :, unk_idx] = -1e10
+    #         # next_words = pred_scores.max(2)[1][:, dec_idx]
+    #         next_words = pred_scores[:, dec_idx].max(1)[1]
+    #         next_symbols = next_words
+    #     return input_ids[:, max_v_len:]  # (N, max_t_len == L-max_v_len)
 
     def translate_batch(
         self,

@@ -189,7 +189,6 @@ class SelfAttention(nn.Module):
             key_states: (N, L, D)
             value_states: (N, L, D)
             attention_mask: (N, Lq, L)
-
         Returns:
         """
         # only need to mask the dimension where the softmax
@@ -235,13 +234,14 @@ class SelfOutput(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        # self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        # hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = hidden_states + input_tensor
         return hidden_states
 
 
@@ -254,6 +254,8 @@ class Attention(nn.Module):
         super().__init__()
         self.self = SelfAttention(cfg, m)
         self.output = SelfOutput(cfg)
+        self.x_norm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.his_norm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
     def forward(self, x, attention_mask=None, clip_his=None):
         """
@@ -262,7 +264,10 @@ class Attention(nn.Module):
             attention_mask: (N, Lq, L)
         Returns:
         """
+        x = self.x_norm(x)
+
         if clip_his is not None:
+            clip_his = self.his_norm(clip_his)
             self_output = self.self(clip_his, x, x, attention_mask)
         else:
             self_output = self.self(x, x, x, attention_mask)
@@ -374,11 +379,12 @@ class TrmFeedForward(nn.Module):
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
+        hidden_states = self.LayerNorm(hidden_states)
         hidden_states = self.dense_f(hidden_states)
         hidden_states = F.relu(hidden_states)
         hidden_states = self.dense_s(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = hidden_states + input_tensor
         return hidden_states
 
 
@@ -494,11 +500,11 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = Attention(cfg, m=3)
-        # self.attention = RelationalSelfAttention(cfg)
+        # self.attention = Attention(cfg, m=3)
+        self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
         # self.batchnorm = nn.BatchNorm1d(3)
-        self.layernorm = nn.LayerNorm(384)
+        # self.layernorm = nn.LayerNorm(384)
 
     def forward(self, x):
         """
@@ -506,14 +512,16 @@ class TrmEncLayer(nn.Module):
             x: (N, L, D)
         Returns:
         """
-        # tmp_x = x.clone()
-        # target = x[:, 1, :].clone()
-        # target = self.attention(target, tmp_x)
+        # for RSA
+        tmp_x = x.clone()
+        target = x[:, 1, :].clone()
+        target = self.attention(target, tmp_x)
 
-        # x[:, 1, :] = target.clone()
-        x = self.attention(x)
+        x[:, 1, :] = target.clone()
+
+        # for MHA
+        # x = self.attention(x)
         x = self.output(x, x)  # (N, L, D)
-        x = self.layernorm(x)
         return x
 
 
@@ -526,15 +534,21 @@ class TimeSeriesEncoder(nn.Module):
             [TrmEncLayer(cfg) for _ in range(num_layers)]
         )
         self.ff = TrmFeedForward(self.cfg)
-        self.norm = nn.LayerNorm(384)
+        # self.norm = nn.LayerNorm(384)
+        self.video_embeddings = nn.Sequential(
+            LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
+            nn.Linear(cfg.video_feature_size, cfg.hidden_size),
+            nn.ReLU(True),
+        )
 
     def forward(self, x):
+        x = self.video_embeddings(x)
         x = self.pe(x)
         res = x.clone()
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, res)
-        x = self.norm(x)
+        # x = self.norm(x)
         return x
 
 
@@ -620,8 +634,8 @@ class EmbeddingsWithVideo(nn.Module):
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
 
-        embeddings = self.LayerNorm(embeddings)
-        embeddings = self.dropout(embeddings)
+        # embeddings = self.LayerNorm(embeddings)
+        # embeddings = self.dropout(embeddings)
         return embeddings  # (N, L, D)
 
 
@@ -688,35 +702,66 @@ class RelationalSelfAttention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.m = m
-        self.hidden_size = 384
-        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        self.hidden_size = 768
+        self.num_head = 12
+        if self.hidden_size % self.num_head == 0:
+            self.hid = int(self.hidden_size / self.num_head)
+        else:
+            print("#Head Error in RSA")
+            sys.exit()
+
+        # for single head
+        # self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        # self.h =\
+        #     torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+        # self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+
+        # for MHA
+        # self.query_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        # self.key_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        # self.value_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        self.p = torch.randn((self.num_head, m, self.hid), requires_grad=True).cuda()
         self.h =\
-            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        self.one = torch.ones((m, 1)).cuda()
-        self.layernorm = LayerNorm(self.hidden_size)
+            torch.randn((self.num_head, m * self.hid, m), requires_grad=True).cuda()
+        self.g = torch.randn((self.num_head, m, self.hid), requires_grad=True).cuda()
+
+        self.one = torch.ones((self.num_head, m, 1)).cuda()
+        self.norm_cont = nn.LayerNorm(self.hidden_size)
+        self.norm_query = nn.LayerNorm(self.hidden_size)
+        self.layernorm = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
-        query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
-        key = self.key_layer(cont)
-        value = self.value_layer(cont)
+        # query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+        # key = self.key_layer(cont)
+        # value = self.value_layer(cont)
+        query = self.norm_query(target)
+        query = query.reshape(-1, self.hidden_size, 1)
+        cont = self.norm_cont(cont)
+        key = cont
+        value = cont
+
+        # Multi Head
+        query = query.reshape(-1, 1, self.num_head, self.hid).permute(0, 2, 1, 3)
+        key = key.reshape(-1, self.m, self.num_head, self.hid).permute(0, 2, 1, 3)
+        value =\
+            value.reshape(-1, self.m, self.num_head, self.hid).permute(0, 2, 1, 3)
 
         # basic kernel
-        kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
+        kernel_v = torch.matmul(self.p, query.permute(0, 1, 3, 2)).reshape(-1, self.num_head, 1, self.m)
 
         # relational kernel
-        q = torch.matmul(self.one, torch.transpose(query, 1, 2))
+        q = torch.matmul(self.one, query)
         x_q = torch.mul(q, key)
-        x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
-        kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
+        x_q = x_q.reshape((-1, self.num_head, 1, self.m * self.hid))
+        kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.num_head, 1, self.m)
         kernel = kernel_v + kernel_r
         
         # relational context
         xg = value.clone()
-        xg = torch.transpose(xg, 1, 2)
+        xg = torch.transpose(xg, 2, 3)
         _xg = torch.matmul(xg, self.g)
         x_nr = torch.matmul(value, _xg)
         context = x_nr + value
@@ -732,10 +777,10 @@ class TimeSeriesMoudule(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.cfg.hidden_size = 384
+        # self.cfg.hidden_size = 384
         self.hidden_size = 768
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
-        self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
+        # self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         self.layernorm = nn.LayerNorm(self.hidden_size)
         self.cfg.hidden_size = 768
         # self.z = torch.randn(1, requires_grad=True).cuda()
@@ -743,9 +788,9 @@ class TimeSeriesMoudule(nn.Module):
     def forward(self, x):
         ts_feats = x.clone().cuda()
         ts_feats = self.TSEncoder(ts_feats)
-        ts_feats = self.expand(ts_feats)
+        # ts_feats = self.expand(ts_feats)
         tmp_feats = ts_feats[:, 1, :].reshape((-1, 1, self.hidden_size))
-        tmp_feats = self.layernorm(tmp_feats)
+        # tmp_feats = self.layernorm(tmp_feats)
         return ts_feats, tmp_feats
 
 
@@ -756,12 +801,12 @@ class CLIPloss(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.w = nn.Linear(25 * 768, 384)
+        self.w = nn.Linear(25 * 768, 768)
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
-        self.norm_i = nn.LayerNorm(384)
-        self.norm_t = nn.LayerNorm(384)
+        self.norm_i = nn.LayerNorm(768)
+        self.norm_t = nn.LayerNorm(768)
     
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
@@ -769,8 +814,6 @@ class CLIPloss(nn.Module):
         i_e = self.norm_i(clip)
         t_e = self.norm_t(text)
         logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
-        # print(logits)
-        # sys.exit()
         n = i_e.shape[0]
         labels = torch.arange(n, device=torch.device("cuda"))
         loss_i = self.i_loss(logits, labels)
@@ -811,6 +854,7 @@ class RecursiveTransformer(nn.Module):
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
             nn.Linear(input_size, input_size),
@@ -881,7 +925,8 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(
             decoded_layer_outputs[-1] # (batch_size, 25, 768)
         )  # (N, L, vocab_size)
-        return decoded_layer_outputs[-1], prediction_scores, future_b
+        return decoded_layer_outputs[-1], prediction_scores, future_b, ts_feat.reshape(-1, 768)
+        # return ts_feat, prediction_scores, future_b
 
     # ver. future
     def forward(
@@ -915,7 +960,7 @@ class RecursiveTransformer(nn.Module):
         future_gt = []
         video_feat_list = []
         for idx in range(step_size):
-            decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+            decoded_layer_outputs, prediction_scores, pred_future, ts_feat = self.forward_step(
                 input_ids_list[idx],
                 video_features_list[idx],
                 input_masks_list[idx],
@@ -926,7 +971,8 @@ class RecursiveTransformer(nn.Module):
             future_rec.append(pred_future)
             decoded_outputs_list.append(decoded_layer_outputs)
             prediction_scores_list.append(prediction_scores)
-            video_feat_list.append(video_features_list[idx][:, 1, :])
+            video_feat_list.append(ts_feat)
+            # video_feat_list.append(video_features_list[idx][:, 1, :])
             action_score.append(prediction_scores[:, 3, :])
         # compute loss, get predicted words
         caption_loss = 0.0
@@ -944,9 +990,9 @@ class RecursiveTransformer(nn.Module):
                 if gt_idx[0] == -1:
                     continue
                 if gt_idx[0] in ACTION_WEIGHT:
-                    action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action) / ACTION_WEIGHT[gt_idx[0]]
                 else:
-                    action_loss += (1 / 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action) / 3000
             cont_loss = 0.0
             # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             # tmp_idx_list = input_labels_list[idx].view(-1)
@@ -954,10 +1000,10 @@ class RecursiveTransformer(nn.Module):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
             # for i in range(0, len(tmp_pred_score_list) - 1):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
-            cont_loss += self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
+            # cont_loss = self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
+            cont_loss = self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                1.0 * snt_loss + 0.1 * fut_loss + cont_loss + 10 * action_loss
-                # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
+                snt_loss + 0.01 * fut_loss + cont_loss + 10 * action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
