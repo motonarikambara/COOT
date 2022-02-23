@@ -458,11 +458,11 @@ class MartTrainer(trainer_base.BaseTrainer):
                 _val_loss, _val_score, is_best, _metrics = self.validate_epoch(
                     val_loader
                 )
-                if is_best:
-                    print("#############################################")
-                    print("Do test")
-                    self.test_epoch(test_loader)
-                    print("###################################################")
+                # if is_best:
+                print("#############################################")
+                print("Do test")
+                self.test_epoch(test_loader)
+                print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
