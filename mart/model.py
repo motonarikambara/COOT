@@ -20,14 +20,14 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-ACTION_WEIGHT = {34:2603, 538: 426, 547: 300, 54: 283, 169: 250, 551: 225, 598: 186, 198: 158, 748: 147, 403: 138, 317: 134, 589: 132, 209: 104, 99: 94, 407: 89, 94: 89, 343: 80, 452: 79, 493: 79, 675: 77, 336: 73, 270: 72, 308: 67, 887: 59, 561: 51, 8: 50, 842: 47, 962: 45, 266: 44, 234: 42, 304: 40, 744: 33, 690: 31}
+ACTION_WEIGHT = {34: 2603, 538: 426, 547: 300, 54: 283, 169: 250, 551: 225, 598: 186, 198: 158, 748: 147, 403: 138, 317: 134, 589: 132, 209: 104, 99: 94, 407: 89, 94: 89, 343: 80, 452: 79, 493: 79, 675: 77, 336: 73, 270: 72, 308: 67, 887: 59, 561: 51, 8: 50, 842: 47, 962: 45, 266: 44, 234: 42, 304: 40, 744: 33, 690: 31}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
-INF = float("inf")
+# INF = float("inf")
 
 
 # # this should be "infinite enough" for -INF to give 0 for masked softmax attention values.
-# INF = 1e19
+INF = 1e19
 # for fp16 need something like 255
 
 
@@ -78,18 +78,6 @@ def create_mart_model(
             count_parameters(model.embeddings.word_embeddings)
 
     return model
-
-
-# def gelu(x):
-#     """
-#     Implementation of the gelu activation function.
-#         For information: OpenAI GPT"s gelu is slightly different
-#         (and gives slightly different results):
-#         0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
-#         Also see https://arxiv.org/abs/1606.08415
-#     Pytorch公式実装のgeluで良さそう
-#     """
-#     return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
 class PositionEncoding(nn.Module):
@@ -191,9 +179,7 @@ class SelfAttention(nn.Module):
             attention_mask: (N, Lq, L)
         Returns:
         """
-        # only need to mask the dimension where the softmax
-        # (last dim) is applied, as another dim (second last)
-        # will be ignored in future computation anyway
+
         if attention_mask is not None:
             attention_mask = (
                 1 - attention_mask.unsqueeze(1)
@@ -204,21 +190,15 @@ class SelfAttention(nn.Module):
         query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
         key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
         value_layer = self.transpose_for_scores(mixed_value_layer)  # (N, nh, L, dh)
-        # Take the dot product between "query" and "key"
-        # to get the raw attention scores.
+
         att_w = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # (N, nh, Lq, L)
         att_w = att_w / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers
-            # in BertModel forward() function)
             att_w = att_w + attention_mask
-        # Normalize the attention scores to probabilities.
+
         attention_probs = nn.Softmax(dim=-1)(att_w)
         attention_probs = self.dropout(attention_probs)
 
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
-        # attention_probs = self.dropout(attention_probs)
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -234,10 +214,13 @@ class SelfOutput(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        # self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.norm_hid = nn.LayerNorm(cfg.hidden_size)
+        self.norm_input = nn.LayerNorm(cfg.hidden_size)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
+        hidden_states = self.norm_hid(hidden_states)
+        input_tensor = self.norm_input(input_tensor)
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         # hidden_states = self.LayerNorm(hidden_states + input_tensor)
@@ -275,20 +258,20 @@ class Attention(nn.Module):
         return att
 
 
-class Intermediate(nn.Module):
-    """
-    geluを用いた1層線形変換
-    """
+# class Intermediate(nn.Module):
+#     """
+#     geluを用いた1層線形変換
+#     """
 
-    def __init__(self, cfg):
-        super().__init__()
-        self.dense = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
-        self.intermediate_act_fn = nn.GELU()
+#     def __init__(self, cfg):
+#         super().__init__()
+#         self.dense = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
+#         self.intermediate_act_fn = nn.GELU()
 
-    def forward(self, hidden_states):
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.intermediate_act_fn(hidden_states)
-        return hidden_states
+#     def forward(self, hidden_states):
+#         hidden_states = self.dense(hidden_states)
+#         hidden_states = self.intermediate_act_fn(hidden_states)
+#         return hidden_states
 
 
 class Output(nn.Module):
@@ -353,9 +336,6 @@ def make_pad_shifted_mask(
     shifted_mask = make_shifted_mask(
         input_mask, max_v_len, max_t_len, memory_len=memory_len, decoder=False
     )
-    # It's correct to use `input_mask.unsqueeze(1)' instead of
-    # `torch.bmm(input_mask.unsqueeze(2), input_mask.unsqueeze(1))'
-    # since the rest of the bits are still masked in the subsequent processing steps.
     pad_shifted_mask = shifted_mask * input_mask.unsqueeze(1)
     return pad_shifted_mask
 
@@ -393,26 +373,25 @@ class LayerWoMemory(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.attention = Attention(cfg)
-        self.hidden_intermediate = Intermediate(cfg)
+        # self.hidden_intermediate = Intermediate(cfg)
         self.output = Output(cfg)
 
     def forward(self, hidden_states, attention_mask, clip_feats=None):
         """
         Args:
-            prev_m: (N, M, D)
             hidden_states: (N, L, D)
             attention_mask: (N, L)
         Returns:
         """
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
-        # self-attention, need to shift right
+
         shifted_self_mask = make_pad_shifted_mask(
             attention_mask, max_v_len, max_t_len
         )  # (N, L, L)
         attention_output = self.attention(hidden_states, shifted_self_mask, clip_feats)
-        intermediate_output = self.hidden_intermediate(attention_output)
+        # intermediate_output = self.hidden_intermediate(attention_output)
 
-        return intermediate_output
+        return attention_output
 
 
 class EncoderWoMemory(nn.Module):
@@ -425,13 +404,12 @@ class EncoderWoMemory(nn.Module):
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
         """
         Args:
-            prev_ms: [(N, M, D), ] * num_hidden_layers or None at first step.
-            Memory states for each layer
             hidden_states: (N, L, D)
             attention_mask: (N, L)
             output_all_encoded_layers:
 
         Returns:
+            encoder_outputs
         """
         all_encoder_layers = []
         for layer_idx, layer_module in enumerate(self.layer):
@@ -453,13 +431,11 @@ class DecoderLayer(nn.Module):
     def forward(self, x, attention_mask, clip_his):
         """
         Args:
-            prev_m: (N, M, D)
             hidden_states: (N, L, D)
             attention_mask: (N, L)
         Returns:
         """
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
-        # self-attention, need to shift right
         shifted_self_mask = make_pad_shifted_mask(
             attention_mask, max_v_len, max_t_len, decoder=True
         )  # (N, L, L)
@@ -503,8 +479,6 @@ class TrmEncLayer(nn.Module):
         # self.attention = Attention(cfg, m=3)
         self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
-        # self.batchnorm = nn.BatchNorm1d(3)
-        # self.layernorm = nn.LayerNorm(384)
 
     def forward(self, x):
         """
@@ -521,6 +495,7 @@ class TrmEncLayer(nn.Module):
 
         # for MHA
         # x = self.attention(x)
+
         x = self.output(x, x)  # (N, L, D)
         return x
 
@@ -534,7 +509,6 @@ class TimeSeriesEncoder(nn.Module):
             [TrmEncLayer(cfg) for _ in range(num_layers)]
         )
         self.ff = TrmFeedForward(self.cfg)
-        # self.norm = nn.LayerNorm(384)
         self.video_embeddings = nn.Sequential(
             LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
             nn.Linear(cfg.video_feature_size, cfg.hidden_size),
@@ -548,7 +522,6 @@ class TimeSeriesEncoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, res)
-        # x = self.norm(x)
         return x
 
 
@@ -573,15 +546,15 @@ class EmbeddingsWithVideo(nn.Module):
             cfg.vocab_size, cfg.word_vec_size, padding_idx=0
         )
         self.word_fc = nn.Sequential(
-            LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
             nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.word_vec_size, cfg.hidden_size),
             nn.ReLU(True),
             LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
         self.video_embeddings = nn.Sequential(
-            LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
-            # nn.Dropout(cfg.hidden_dropout_prob),
+            nn.LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
+            nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.video_feature_size, cfg.hidden_size),
             nn.ReLU(True),
             LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
@@ -593,9 +566,7 @@ class EmbeddingsWithVideo(nn.Module):
             )
         self.token_type_embeddings = nn.Embedding(cfg.type_vocab_size, cfg.hidden_size)
 
-        # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
-        # any TensorFlow checkpoint file
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
         self.TSModule = TimeSeriesMoudule(cfg)
@@ -626,7 +597,6 @@ class EmbeddingsWithVideo(nn.Module):
         video_embeddings = self.video_embeddings(video_features)
 
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-        # print("words", words_embeddings.shape, "vid", video_embeddings.shape, "token",token_type_embeddings.shape)
         words_embeddings += token_type_embeddings
         embeddings = words_embeddings + video_embeddings + token_type_embeddings
         # embeddings = torch.cat([words_embeddings, video_embeddings], dim=1)
@@ -634,8 +604,6 @@ class EmbeddingsWithVideo(nn.Module):
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
 
-        # embeddings = self.LayerNorm(embeddings)
-        # embeddings = self.dropout(embeddings)
         return embeddings  # (N, L, D)
 
 
@@ -643,7 +611,6 @@ class PredictionHeadTransform(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
-        # self.transform_act_fn = gelu
         self.gelu = nn.GELU()
         self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
@@ -662,8 +629,6 @@ class LMPredictionHead(nn.Module):
         super().__init__()
         self.transform = PredictionHeadTransform(cfg)
 
-        # The output weights are the same as the input embeddings, but there is
-        # an output-only bias for each token.
         if cfg.share_wd_cls_weight:
             assert bert_model_embedding_weights is not None, (
                 "bert_model_embedding_weights should not be None "
@@ -856,13 +821,6 @@ class RecursiveTransformer(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(input_size * 2, input_size),
-            nn.ReLU(),
-            nn.Linear(input_size, input_size),
-        )
-        self.ff = nn.Sequential(
-            nn.Linear(input_size, input_size),
-            nn.ReLU(),
-            nn.Linear(input_size, input_size),
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
@@ -872,9 +830,6 @@ class RecursiveTransformer(nn.Module):
         Initialize the weights.
         """
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            # Slightly different from the TF version
-            # which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
         elif isinstance(module, LayerNorm):
             module.bias.data.zero_()
@@ -1004,6 +959,6 @@ class RecursiveTransformer(nn.Module):
             cont_loss = self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                snt_loss + 0.01 * fut_loss + cont_loss + 10 * action_loss
+                snt_loss + fut_loss + cont_loss + action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
