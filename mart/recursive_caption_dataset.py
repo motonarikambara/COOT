@@ -113,22 +113,7 @@ class RecursiveCaptionDataset(data.Dataset):
         # ---------- Load metadata ----------
 
         # determine metadata file
-        if self.dset_name == "activitynet":
-            if mode == "train":  # 10000 videos
-                data_path = self.annotations_dir / self.dset_name / "train.json"
-            elif mode == "val":  # 2500 videos
-                data_path = (
-                    self.annotations_dir / self.dset_name / "captioning_val_1.json"
-                )
-            elif mode == "test":  # 2500 videos
-                data_path = (
-                    self.annotations_dir / self.dset_name / "captioning_test_1.json"
-                )
-            else:
-                raise ValueError(
-                    f"Mode must be [train, val, test] for {self.dset_name}, got {mode}"
-                )
-        elif self.dset_name == "youcook2":
+        if self.dset_name == "youcook2":
             tmp_path = "youcook2_next"
             if mode == "train":  # 1333 videos
                 # data_path = self.annotations_dir / self.dset_name / "captioning_train.json"

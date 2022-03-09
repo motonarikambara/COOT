@@ -27,7 +27,7 @@ ACTION_WEIGHT = {34: 2603, 538: 426, 547: 300, 54: 283, 169: 250, 551: 225, 598:
 
 
 # # this should be "infinite enough" for -INF to give 0 for masked softmax attention values.
-INF = 1e19
+# INF = 1e19
 # for fp16 need something like 255
 
 
@@ -197,7 +197,7 @@ class SelfAttention(nn.Module):
             att_w = att_w + attention_mask
 
         attention_probs = nn.Softmax(dim=-1)(att_w)
-        attention_probs = self.dropout(attention_probs)
+        # attention_probs = self.dropout(attention_probs)
 
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -221,8 +221,8 @@ class SelfOutput(nn.Module):
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.norm_hid(hidden_states)
         input_tensor = self.norm_input(input_tensor)
-        hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
+        hidden_states = self.dense(hidden_states)
         # hidden_states = self.LayerNorm(hidden_states + input_tensor)
         hidden_states = hidden_states + input_tensor
         return hidden_states
@@ -355,16 +355,18 @@ class TrmFeedForward(nn.Module):
         super().__init__()
         self.dense_f = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
         self.dense_s = nn.Linear(cfg.intermediate_size, cfg.hidden_size)
-        self.LayerNorm = LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
+        self.afternorm = nn.LayerNorm(cfg.hidden_size)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.LayerNorm(hidden_states)
-        hidden_states = self.dense_f(hidden_states)
-        hidden_states = F.relu(hidden_states)
-        hidden_states = self.dense_s(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = hidden_states + input_tensor
+        hidden_states = self.dense_f(hidden_states)
+        hidden_states = F.gelu(hidden_states)
+        hidden_states = self.dense_s(hidden_states)
+        # hidden_states = hidden_states + input_tensor
+        hidden_states = self.afternorm(hidden_states + input_tensor)
         return hidden_states
 
 
@@ -397,8 +399,10 @@ class LayerWoMemory(nn.Module):
 class EncoderWoMemory(nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        enc_layers = 6
         self.layer = nn.ModuleList(
-            [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
+            [LayerWoMemory(cfg) for _ in range(enc_layers)]
+            # [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
         )
 
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
@@ -501,7 +505,7 @@ class TrmEncLayer(nn.Module):
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=2):
+    def __init__(self, cfg, num_layers=3):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=cfg.hidden_size)
@@ -510,9 +514,11 @@ class TimeSeriesEncoder(nn.Module):
         )
         self.ff = TrmFeedForward(self.cfg)
         self.video_embeddings = nn.Sequential(
-            LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
+            nn.LayerNorm(cfg.video_feature_size),
+            nn.Dropout(0.2),
             nn.Linear(cfg.video_feature_size, cfg.hidden_size),
             nn.ReLU(True),
+            nn.LayerNorm(cfg.hidden_size),
         )
 
     def forward(self, x):
@@ -733,7 +739,7 @@ class RelationalSelfAttention(nn.Module):
 
         # fusion
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
-        output = self.layernorm(output)
+        # output = self.layernorm(output)
 
         return output
 
@@ -817,9 +823,10 @@ class RecursiveTransformer(nn.Module):
         # clipの特徴量の次元
         input_size = 384
         self.pred_f = nn.Sequential(
+            nn.LayerNorm(input_size),
+            nn.Dropout(0.2),
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
-            nn.Dropout(0.2),
             nn.Linear(input_size * 2, input_size),
         )
         self.future_loss = nn.MSELoss()
@@ -959,6 +966,6 @@ class RecursiveTransformer(nn.Module):
             cont_loss = self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                snt_loss + fut_loss + cont_loss + action_loss
+                snt_loss + fut_loss + 0.1 * cont_loss + action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
