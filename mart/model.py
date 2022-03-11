@@ -213,9 +213,11 @@ class SelfOutput(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
+        self.dense = nn.Linear(cfg.hidden_size, 2 * cfg.hidden_size)
+        self.dence2 = nn.Linear(2 * cfg.hidden_size, cfg.hidden_size)
         self.norm_hid = nn.LayerNorm(cfg.hidden_size)
         self.norm_input = nn.LayerNorm(cfg.hidden_size)
+        self.norm_hidden = nn.LayerNorm(cfg.hidden_size)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -223,6 +225,8 @@ class SelfOutput(nn.Module):
         input_tensor = self.norm_input(input_tensor)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.dense(hidden_states)
+        hidden_states = self.dence2(F.gelu(hidden_states))
+        hidden_states = self.norm_hidden(hidden_states)
         # hidden_states = self.LayerNorm(hidden_states + input_tensor)
         hidden_states = hidden_states + input_tensor
         return hidden_states
@@ -256,22 +260,6 @@ class Attention(nn.Module):
             self_output = self.self(x, x, x, attention_mask)
         att = self.output(self_output, x)
         return att
-
-
-# class Intermediate(nn.Module):
-#     """
-#     geluを用いた1層線形変換
-#     """
-
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.dense = nn.Linear(cfg.hidden_size, cfg.intermediate_size)
-#         self.intermediate_act_fn = nn.GELU()
-
-#     def forward(self, hidden_states):
-#         hidden_states = self.dense(hidden_states)
-#         hidden_states = self.intermediate_act_fn(hidden_states)
-#         return hidden_states
 
 
 class Output(nn.Module):
@@ -376,7 +364,7 @@ class LayerWoMemory(nn.Module):
         self.cfg = cfg
         self.attention = Attention(cfg)
         # self.hidden_intermediate = Intermediate(cfg)
-        self.output = Output(cfg)
+        self.output = SelfOutput(cfg)
 
     def forward(self, hidden_states, attention_mask, clip_feats=None):
         """
@@ -966,6 +954,6 @@ class RecursiveTransformer(nn.Module):
             cont_loss = self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
-                snt_loss + fut_loss + 0.1 * cont_loss + action_loss
+                snt_loss + fut_loss + cont_loss + action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
