@@ -180,8 +180,8 @@ class RecursiveCaptionDataset(data.Dataset):
             else:
                 # new version, everything in the h5
                 # decode video ids from byte to utf8
-                # vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                vid_ids = [key for key in data_file["key"]]
+                vid_ids = [key.decode("utf8") for key in data_file["key"]]
+                # vid_ids = [key for key in data_file["key"]]
 
                 # load clip information
                 clip_nums = data_file["clip_num"]
@@ -386,17 +386,17 @@ class RecursiveCaptionDataset(data.Dataset):
             num_sen = len(example["sentences"])
             single_video_features = []
             single_video_meta = []
-            # for clip_idx in range(num_sen):
-            #     cur_data, cur_meta = self.clip_sentence_to_feature(
-            #         example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature,
-            #         clip_idx)
-            #     single_video_features.append(cur_data)
-            #     single_video_meta.append(cur_meta)
+            for clip_idx in range(num_sen):
+                cur_data, cur_meta = self.clip_sentence_to_feature(
+                    example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature,
+                    clip_vid)
+                single_video_features.append(cur_data)
+                single_video_meta.append(cur_meta)
             # cur_data:video特徴量を含むdict
-            cur_data, cur_meta = self.clip_sentence_to_feature(
-                example["name"], example["timestamps"], example["sentences"], video_feature, clip_vid)
-            single_video_features.append(cur_data)
-            single_video_meta.append(cur_meta)
+            # cur_data, cur_meta = self.clip_sentence_to_feature(
+            #     example["name"], example["timestamps"][clip_idx], example["sentences"][clip_idx], video_feature, clip_vid)
+            # single_video_features.append(cur_data)
+            # single_video_meta.append(cur_meta)
             # single_video_features: video特徴量を含むdict
             return single_video_features, single_video_meta
         else:
