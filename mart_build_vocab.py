@@ -128,8 +128,15 @@ def _unused_build_vocab_idx(word_insts: List[List[str]], min_word_count) -> Dict
     print(("[Info] Trimmed vocabulary size = {},".format(len(word2idx)),
            "each with minimum occurrence = {}".format(min_word_count)))
     print(("[Info] Ignored word count = {}".format(ignored_word_count)))
+
+    w2ifile = open("annotations/ponnet/mart_word2idx.json", "w")
+    json.dump(word2idx, w2ifile)
     return word2idx
 
 
 if __name__ == "__main__":
+    # main()
+    words = json.load(open("annotations/ponnet/trainval_sents.json", "r"))
+    sents = words["sents"]
+    _unused_build_vocab_idx(sents, 5)
     main()
